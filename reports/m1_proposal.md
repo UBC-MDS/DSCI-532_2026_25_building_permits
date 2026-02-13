@@ -52,3 +52,23 @@ As a real estate developer, I want to view average project value per neighbourho
 
 **User Story 4:**
 As a city planner, I want to see a time series of permit volume per month or season, with the ability to forecast future building permits, so that I can detect seasonal patterns and plan departmental workload accordingly.
+
+## Section 5: App Sketch & Description
+
+### Sketch:
+
+![Sketch](../img/vancouver-building-permits-sketch.png)
+
+**Description of Sketch:**
+
+The dashboard is a single landing page for the City of Vancouver Planners and other external stakeholders such as developers to monitor building permit trends, processing efficiency, and neighbourhood building activity. 
+
+The landing page shows a time series chart that shows permit volume trends over time, and also forecasts the estimated future permit volumes. This time series chart lets users look at possible seasonality and growth patterns of permits issued. 
+
+There are key performance indicator (KPI) cards to the right of the time series chart that show the number of permits issued and average processing time of these permits for this year up until the current date. These KPI cards are meant to give a quick summary to city planners from the permits department to allow them to view overall permit issuing performance. 
+
+The bar chart below the time series chart is meant to give planners and stakeholders a top-down summary of the neighbourhoods with the highest permits issued. This allows users to quickly analyze the neighbourhoods that are currently having the most development.  
+
+An interactive map to the right of the bar chart acts as a selector and visualizes the permit volume for each specific Vancouver neighbourhood based on the neighbourhood/coordinate features provided in the dataset. If the user clicks on a specific neighbourhood, the map re-filters the charts and KPIs to highlight only that neighbourhood. 
+
+A left side filter panel allows the user to filter by date range, type of work (e.g. New Building, etc.), and neighbourhood. These filters let users drill down on demand so the charts and KPIs update to be based on their selected criteria.
