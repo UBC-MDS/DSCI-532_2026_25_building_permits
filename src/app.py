@@ -1,10 +1,15 @@
 from datetime import date
-
 from shiny import App, reactive, render, ui
+import pandas as pd
 
+# read in the df 
+permits_df = pd.read_csv('data/raw/issued-building-permits.csv', sep = ';', encoding = 'utf-8')
 
-DEFAULT_START_DATE = date(2019, 1, 1)
-DEFAULT_END_DATE = date(2025, 12, 31)
+permits_df['IssueDate'] = pd.to_datetime(permits_df['IssueDate'])
+
+# find the minimum and maximum issue date dynamically from the data 
+EARLIEST_ISSUE_DATE = permits_df['IssueDate'].min().date()
+LATEST_ISSUE_DATE = permits_df['IssueDate'].max().date()
 
 
 app_ui = ui.page_fluid(
@@ -137,8 +142,10 @@ app_ui = ui.page_fluid(
             ui.input_date_range(
                 id="date_range",
                 label="Permit issued date range",
-                start=DEFAULT_START_DATE,
-                end=DEFAULT_END_DATE,
+                start=EARLIEST_ISSUE_DATE,
+                end=LATEST_ISSUE_DATE,
+                min=EARLIEST_ISSUE_DATE, # prevent user from selecting dates from outside the earliest and latest permit issuance dates
+                max=LATEST_ISSUE_DATE
             ),
             ui.input_checkbox_group(
                 id="checkbox_group",
@@ -164,6 +171,7 @@ app_ui = ui.page_fluid(
             ),
             ui.input_action_button("action_button", "Clear Selection"),
             open="desktop",
+            width=300,
         ),
         ui.layout_columns(
             ui.card(
@@ -199,8 +207,8 @@ def server(input, output, session):
     def _reset_filters():
         ui.update_date_range(
             "date_range",
-            start=DEFAULT_START_DATE,
-            end=DEFAULT_END_DATE,
+            start=EARLIEST_ISSUE_DATE,
+            end=LATEST_ISSUE_DATE,
         )
         ui.update_checkbox_group(
             "checkbox_group",
