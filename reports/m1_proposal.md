@@ -53,6 +53,14 @@ As a real estate developer, I want to view average project value per neighbourho
 **User Story 4:**
 As a city planner, I want to see a time series of permit volume per month or season, with the ability to forecast future building permits, so that I can detect seasonal patterns and plan departmental workload accordingly.
 
+## Section 4: Exploratory Data Analysis
+
+Exploratory Data Analysis is performed to address User Story 4, in which we visualize permit volume over time, as well as the average volume of permits by month. The first plot allows the user to view the overall trend of permit counts over the years, while the second plot aids the city planner in planning their permit requests and work according to seasonal trends.
+
+The permits over time graph shows a sharp decline in the early 2020s, coinciding with the COVID pandemic before spiking once work was cleared to resume. Seasonally, more permit activity takes place during the summer months, or around November before tapering off during the winter and spring where work conditions are likely less than ideal.
+
+[EDA](../notebooks/eda_analysis.ipynb)
+
 ## Section 5: App Sketch & Description
 
 ### Sketch:
