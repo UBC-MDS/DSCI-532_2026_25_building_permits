@@ -6,12 +6,7 @@ MAX_YEAR = 2025
 
 
 app_ui = ui.page_fluid(
-    ui.tags.style(
-        """
-        body { font-size: 0.9em; background-color: #f6f7fb; }
-        .placeholder-note { color: #4a4f65; }
-        """
-    ),
+    
     ui.panel_title(
         "Vancouver Building Permits: Trends, Processing Times, and Neighbourhood Activity"
     ),
@@ -50,30 +45,28 @@ app_ui = ui.page_fluid(
             open="desktop",
         ),
         ui.layout_columns(
-            ui.value_box("Permits Issued (YTD)", ui.output_text("permits_ytd")),
-            ui.value_box("Avg Processing Time (YTD)", ui.output_text("avg_days")),
-            ui.value_box("Selected Neighbourhood", ui.output_text("selected_area")),
-            fill=False,
-        ),
-        ui.layout_columns(
             ui.card(
                 ui.card_header("Permit Volume Over Time + Forecast"),
                 ui.output_text("trend_placeholder"),
                 full_screen=True,
             ),
+            ui.value_box("Permits Issued (YTD)", ui.output_text("permits_ytd")),
+            ui.value_box("Avg Processing Time (YTD)", ui.output_text("avg_days")),
+            col_widths=[6, 3, 3],
+            fill=False,
+        ),
+        ui.layout_columns(
             ui.card(
                 ui.card_header("Top Neighbourhoods by Permit Volume (YTD)"),
                 ui.output_text("top_neighbourhoods_placeholder"),
                 full_screen=True,
             ),
-            col_widths=[6, 6],
-        ),
-        ui.layout_columns(
             ui.card(
                 ui.card_header("Building Permit Activity By Neighbourhood"),
                 ui.output_text("map_placeholder"),
                 full_screen=True,
-            )
+            ),
+            col_widths=[6, 6],
         ),
     ),
 )
@@ -97,10 +90,6 @@ def server(input, output, session):
     @render.text
     def avg_days():
         return "Placeholder value"
-
-    @render.text
-    def selected_area():
-        return input.area()
 
     @render.text
     def trend_placeholder():
