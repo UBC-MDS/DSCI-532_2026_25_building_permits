@@ -1,23 +1,144 @@
+from datetime import date
+
 from shiny import App, reactive, render, ui
 
 
-MIN_YEAR = 2019
-MAX_YEAR = 2025
+DEFAULT_START_DATE = date(2019, 1, 1)
+DEFAULT_END_DATE = date(2025, 12, 31)
 
 
 app_ui = ui.page_fluid(
-    
+    ui.tags.style(
+        """
+        :root {
+          --brand: #2d2aa8;
+          --brand-soft: #4d4a95;
+          --surface: #f6f7fb;
+          --card-bg: #ffffff;
+          --card-border: #dfe2ef;
+          --muted: #4a4f65;
+        }
+
+        body {
+          font-size: 0.9em;
+          background-color: var(--surface);
+          color: #1d2333;
+        }
+
+        .container-fluid {
+          max-width: 1500px;
+          padding-left: 18px;
+          padding-right: 18px;
+        }
+
+        h2 {
+          color: var(--brand);
+          font-weight: 800;
+          text-align: center;
+          margin-top: 16px;
+          margin-bottom: 16px;
+          font-size: 2.4rem;
+          line-height: 1.2;
+        }
+
+        .bslib-sidebar-layout > .sidebar {
+          background: var(--card-bg);
+          border: 1px solid var(--card-border);
+          border-radius: 10px;
+          padding: 14px 14px 18px 14px;
+        }
+
+        .sidebar .control-label {
+          color: var(--brand);
+          font-weight: 700;
+          margin-bottom: 6px;
+        }
+
+        .shiny-input-checkboxgroup .shiny-options-group {
+          margin-top: 10px;
+        }
+
+        .form-control,
+        .form-select {
+          border: 1px solid #cfd5ea;
+          border-radius: 8px;
+        }
+
+        .btn.btn-default,
+        .btn.btn-primary {
+          width: 100%;
+          background: var(--brand);
+          border-color: var(--brand);
+          color: #fff;
+          font-weight: 600;
+          border-radius: 8px;
+        }
+
+        .bslib-value-box {
+          background: var(--card-bg);
+          border: 1px solid var(--card-border);
+          border-radius: 10px;
+          min-height: 138px;
+        }
+
+        .bslib-value-box .value-box-title {
+          color: var(--brand-soft);
+          font-size: 0.98rem;
+          font-weight: 700;
+        }
+
+        .bslib-value-box .value-box-value {
+          font-size: 1.55rem;
+          font-weight: 800;
+          color: #111827;
+        }
+
+        .card.bslib-card {
+          background: var(--card-bg);
+          border: 1px solid var(--card-border);
+          border-radius: 10px;
+          box-shadow: none;
+        }
+
+        .card.bslib-card .card-header {
+          background: transparent;
+          border-bottom: 1px solid #edf0fb;
+          color: var(--brand-soft);
+          font-weight: 700;
+          font-size: 1.25rem;
+        }
+
+        .card.bslib-card .card-body {
+          min-height: 220px;
+        }
+
+        #map_placeholder {
+          min-height: 360px;
+          display: block;
+        }
+
+        #trend_placeholder,
+        #top_neighbourhoods_placeholder,
+        #map_placeholder {
+          border: 1px dashed #a7b0d2;
+          border-radius: 8px;
+          padding: 14px;
+          background: #f1f3fa;
+          color: var(--muted);
+          line-height: 1.45;
+        }
+        """
+    ),
     ui.panel_title(
         "Vancouver Building Permits: Trends, Processing Times, and Neighbourhood Activity"
     ),
     ui.layout_sidebar(
         ui.sidebar(
-            ui.input_slider(
-                id="slider",
-                label="Permit issued year range",
-                min=MIN_YEAR,
-                max=MAX_YEAR,
-                value=[MIN_YEAR, MAX_YEAR],
+            ui.input_date_range(
+                id="date_range",
+                label="Permit issued date range",
+                start=DEFAULT_START_DATE,
+                end=DEFAULT_END_DATE,
             ),
             ui.input_checkbox_group(
                 id="checkbox_group",
@@ -41,7 +162,7 @@ app_ui = ui.page_fluid(
                 choices=["All", "Placeholder A", "Placeholder B"],
                 selected="All",
             ),
-            ui.input_action_button("action_button", "Reset filter"),
+            ui.input_action_button("action_button", "Clear Selection"),
             open="desktop",
         ),
         ui.layout_columns(
@@ -76,7 +197,11 @@ def server(input, output, session):
     @reactive.effect
     @reactive.event(input.action_button)
     def _reset_filters():
-        ui.update_slider("slider", value=[MIN_YEAR, MAX_YEAR])
+        ui.update_date_range(
+            "date_range",
+            start=DEFAULT_START_DATE,
+            end=DEFAULT_END_DATE,
+        )
         ui.update_checkbox_group(
             "checkbox_group",
             selected=["Residential", "Commercial", "Demolition", "Alteration"],
