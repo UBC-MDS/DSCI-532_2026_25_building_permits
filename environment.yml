@@ -1,0 +1,10 @@
+name: 532_group_25
+channels:
+  - conda-forge
+dependencies:
+  - python=3.14.3
+  - ipykernel=7.2.0 
+  - pandas=3.0.0
+  - numpy=2.4.2
+  - matplotlib=3.10.8
+  - shiny=1.4.0
