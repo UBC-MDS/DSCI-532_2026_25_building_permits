@@ -2,15 +2,41 @@ from datetime import date
 from shiny import App, reactive, render, ui
 import pandas as pd
 
+# declare the column names for each filter
+ISSUE_DATE = 'IssueDate'
+APPLIED_DATE = 'PermitNumberCreatedDate'
+AREA = 'GeoLocalArea'
+PERMIT_TYPE = 'TypeOfWork'
+
 # read in the df 
 permits_df = pd.read_csv('data/raw/issued-building-permits.csv', sep = ';', encoding = 'utf-8')
 
-permits_df['IssueDate'] = pd.to_datetime(permits_df['IssueDate'])
+# standarsize dates and strip whitespace for values we want to filter on 
+permits_df[ISSUE_DATE] = pd.to_datetime(permits_df[ISSUE_DATE])
+permits_df[PERMIT_TYPE] = permits_df[PERMIT_TYPE].astype(str).str.strip()
 
 # find the minimum and maximum issue date dynamically from the data 
-EARLIEST_ISSUE_DATE = permits_df['IssueDate'].min().date()
-LATEST_ISSUE_DATE = permits_df['IssueDate'].max().date()
+EARLIEST_ISSUE_DATE = permits_df[ISSUE_DATE].min().date()
+LATEST_ISSUE_DATE = permits_df[ISSUE_DATE].max().date()
 
+# find the unique areas/neighbourhoods from the df 
+areas = sorted( # sorted returns a list
+    permits_df[AREA]
+    .dropna()
+    .astype(str)
+    .unique()
+)
+
+AREA_CHOICES = ['All'] + areas
+
+# find the unique permit types to pass in to the sidebar filter below 
+TYPE_CHOICES = sorted(
+    permits_df[PERMIT_TYPE]
+    .dropna()
+    .astype(str)
+    .str.strip() # strip all whitespace (pandas Series so we can use .str)
+    .unique()
+)
 
 app_ui = ui.page_fluid(
     ui.tags.style(
@@ -150,23 +176,13 @@ app_ui = ui.page_fluid(
             ui.input_checkbox_group(
                 id="checkbox_group",
                 label="Type of work",
-                choices={
-                    "Residential": "Residential",
-                    "Commercial": "Commercial",
-                    "Demolition": "Demolition",
-                    "Alteration": "Alteration",
-                },
-                selected=[
-                    "Residential",
-                    "Commercial",
-                    "Demolition",
-                    "Alteration",
-                ],
+                choices=TYPE_CHOICES,
+                selected=TYPE_CHOICES,
             ),
             ui.input_select(
                 id="area",
                 label="GeoLocalArea (Neighbourhood)",
-                choices=["All", "Placeholder A", "Placeholder B"],
+                choices=AREA_CHOICES,
                 selected="All",
             ),
             ui.input_action_button("action_button", "Clear Selection"),
@@ -212,17 +228,50 @@ def server(input, output, session):
         )
         ui.update_checkbox_group(
             "checkbox_group",
-            selected=["Residential", "Commercial", "Demolition", "Alteration"],
+            selected=TYPE_CHOICES,
         )
         ui.update_select("area", selected="All")
 
+    @reactive.calc
+    def filtered_df():
+        df = permits_df.copy()
+
+        # filter based on the inputted date
+        start, end = input.date_range()
+        start = pd.to_datetime(start)
+        end = pd.to_datetime(end)
+        
+        # filter for rows between the start and end date (mutually inclusive)
+        df = df[(df[ISSUE_DATE] >= start) & (df[ISSUE_DATE] <= end)]
+
+        # filter the df so it only contains the permit types checked off
+        types = list(input.checkbox_group())
+        if types: 
+            df = df[df[PERMIT_TYPE].isin(types)]
+
+        # filter based on the area/neighbourhood selected (drop down so only one area/neighbourhood can be selected)
+        area = input.area()
+        if area != "All":
+            df = df[df[AREA] == area] # filter df to only contain selected area
+        
+        return df 
+    
     @render.text
     def permits_to_date():
-        return "Placeholder value"
+        # count of permits based on selected filters/filtered_df
+        return f"{len(filtered_df()):,}"
 
     @render.text
     def avg_days():
-        return "Placeholder value"
+        df = filtered_df()
+
+        applied_date = pd.to_datetime(df[APPLIED_DATE], errors = "coerce")
+        issue_date = pd.to_datetime(df[ISSUE_DATE], errors = "coerce")
+
+        days_taken_to_issue = (issue_date - applied_date).dt.days
+        days_taken_to_issue = days_taken_to_issue.dropna()
+
+        return f"{days_taken_to_issue.mean():.1f} Days"
 
     @render.text
     def trend_placeholder():
