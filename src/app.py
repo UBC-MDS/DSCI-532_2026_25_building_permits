@@ -179,14 +179,14 @@ app_ui = ui.page_fluid(
                 ui.output_text("trend_placeholder"),
                 full_screen=True,
             ),
-            ui.value_box("Permits Issued (YTD)", ui.output_text("permits_ytd")),
-            ui.value_box("Avg Processing Time (YTD)", ui.output_text("avg_days")),
+            ui.value_box("Permits Issued", ui.output_text("permits_to_date")),
+            ui.value_box("Avg Processing Time", ui.output_text("avg_days")),
             col_widths=[6, 3, 3],
             fill=False,
         ),
         ui.layout_columns(
             ui.card(
-                ui.card_header("Top Neighbourhoods by Permit Volume (YTD)"),
+                ui.card_header("Top Neighbourhoods by Permit Volume"),
                 ui.output_text("top_neighbourhoods_placeholder"),
                 full_screen=True,
             ),
@@ -217,7 +217,7 @@ def server(input, output, session):
         ui.update_select("area", selected="All")
 
     @render.text
-    def permits_ytd():
+    def permits_to_date():
         return "Placeholder value"
 
     @render.text
