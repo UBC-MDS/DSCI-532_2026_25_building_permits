@@ -4,7 +4,7 @@
 
 | # | Job Story | Status | Notes |
 |---|-----------|--------|-------|
-| 1 | As a real estate developer, I want to visually see permit distribution per neighbourhood on an interactive map I can click/filter on. This will allow me to identify neighbourhoods with high development activity and potential profitable investment areas. | In Progress | Pending implementation of neighbourhood_map and map_df in 2.2 |
+| 1 | As a real estate developer, I want to visually see permit distribution per neighbourhood on an interactive map I can click/filter on. This will allow me to identify neighbourhoods with high development activity and potential profitable investment areas. | ✅ Implemented | map_df and neighbourhood_map implemented using ipyleaflet |
 | 2 | As a real estate developer, I want to see the average time it takes for a permit to be approved by the city (issued date minus applied date) by neighbourhood and category so that I can see overall approval timelines when planning a development project. | Pending M2 | Requires calculation of average processing time from the filtered_df. |
 | 3 | As an end user, when I adjust the date range, permit type, or neighbourhood filters, I want all the dashboard visuals to update dynamically so I can change my view of the dashboard on the fly. | Pending M2 | Requires reactive calculation using filtered_df. |
 | 4 | When analyzing development activity in Vancouver, I want to see the total number of permits issued within my preferred filters so I can quickly gauge the construction activity for specific times and areas. | Pending M2 | Requires filtered_df + permits_to_date.
