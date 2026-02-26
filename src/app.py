@@ -1,16 +1,45 @@
 from datetime import date
 from shiny import App, reactive, render, ui
+from shinywidgets import output_widget, render_widget
 import pandas as pd
+import ipyleaflet
+from ipywidgets import HTML
+
+# declare the column names for each filter
+ISSUE_DATE = 'IssueDate'
+APPLIED_DATE = 'PermitNumberCreatedDate'
+AREA = 'GeoLocalArea'
+PERMIT_TYPE = 'TypeOfWork'
 
 # read in the df 
 permits_df = pd.read_csv('data/raw/issued-building-permits.csv', sep = ';', encoding = 'utf-8')
 
-permits_df['IssueDate'] = pd.to_datetime(permits_df['IssueDate'])
+# standarsize dates and strip whitespace for values we want to filter on 
+permits_df[ISSUE_DATE] = pd.to_datetime(permits_df[ISSUE_DATE])
+permits_df[PERMIT_TYPE] = permits_df[PERMIT_TYPE].astype(str).str.strip()
 
 # find the minimum and maximum issue date dynamically from the data 
-EARLIEST_ISSUE_DATE = permits_df['IssueDate'].min().date()
-LATEST_ISSUE_DATE = permits_df['IssueDate'].max().date()
+EARLIEST_ISSUE_DATE = permits_df[ISSUE_DATE].min().date()
+LATEST_ISSUE_DATE = permits_df[ISSUE_DATE].max().date()
 
+# find the unique areas/neighbourhoods from the df 
+areas = sorted( # sorted returns a list
+    permits_df[AREA]
+    .dropna()
+    .astype(str)
+    .unique()
+)
+
+AREA_CHOICES = ['All'] + areas
+
+# find the unique permit types to pass in to the sidebar filter below 
+TYPE_CHOICES = sorted(
+    permits_df[PERMIT_TYPE]
+    .dropna()
+    .astype(str)
+    .str.strip() # strip all whitespace (pandas Series so we can use .str)
+    .unique()
+)
 
 app_ui = ui.page_fluid(
     ui.tags.style(
@@ -117,14 +146,13 @@ app_ui = ui.page_fluid(
           min-height: 220px;
         }
 
-        #map_placeholder {
-          min-height: 360px;
+        #neighbourhood_map {
+          min-height: 400px;
           display: block;
         }
 
         #trend_placeholder,
-        #top_neighbourhoods_placeholder,
-        #map_placeholder {
+        #top_neighbourhoods_placeholder {
           border: 1px dashed #a7b0d2;
           border-radius: 8px;
           padding: 14px;
@@ -150,23 +178,13 @@ app_ui = ui.page_fluid(
             ui.input_checkbox_group(
                 id="checkbox_group",
                 label="Type of work",
-                choices={
-                    "Residential": "Residential",
-                    "Commercial": "Commercial",
-                    "Demolition": "Demolition",
-                    "Alteration": "Alteration",
-                },
-                selected=[
-                    "Residential",
-                    "Commercial",
-                    "Demolition",
-                    "Alteration",
-                ],
+                choices=TYPE_CHOICES,
+                selected=TYPE_CHOICES,
             ),
             ui.input_select(
                 id="area",
                 label="GeoLocalArea (Neighbourhood)",
-                choices=["All", "Placeholder A", "Placeholder B"],
+                choices=AREA_CHOICES,
                 selected="All",
             ),
             ui.input_action_button("action_button", "Clear Selection"),
@@ -179,20 +197,20 @@ app_ui = ui.page_fluid(
                 ui.output_text("trend_placeholder"),
                 full_screen=True,
             ),
-            ui.value_box("Permits Issued (YTD)", ui.output_text("permits_ytd")),
-            ui.value_box("Avg Processing Time (YTD)", ui.output_text("avg_days")),
+            ui.value_box("Permits Issued", ui.output_text("permits_to_date")),
+            ui.value_box("Avg Processing Time", ui.output_text("avg_days")),
             col_widths=[6, 3, 3],
             fill=False,
         ),
         ui.layout_columns(
             ui.card(
-                ui.card_header("Top Neighbourhoods by Permit Volume (YTD)"),
+                ui.card_header("Top Neighbourhoods by Permit Volume"),
                 ui.output_text("top_neighbourhoods_placeholder"),
                 full_screen=True,
             ),
             ui.card(
                 ui.card_header("Building Permit Activity By Neighbourhood"),
-                ui.output_text("map_placeholder"),
+                output_widget("neighbourhood_map"),
                 full_screen=True,
             ),
             col_widths=[6, 6],
@@ -212,17 +230,50 @@ def server(input, output, session):
         )
         ui.update_checkbox_group(
             "checkbox_group",
-            selected=["Residential", "Commercial", "Demolition", "Alteration"],
+            selected=TYPE_CHOICES,
         )
         ui.update_select("area", selected="All")
 
+    @reactive.calc
+    def filtered_df():
+        df = permits_df.copy()
+
+        # filter based on the inputted date
+        start, end = input.date_range()
+        start = pd.to_datetime(start)
+        end = pd.to_datetime(end)
+        
+        # filter for rows between the start and end date (mutually inclusive)
+        df = df[(df[ISSUE_DATE] >= start) & (df[ISSUE_DATE] <= end)]
+
+        # filter the df so it only contains the permit types checked off
+        types = list(input.checkbox_group())
+        if types: 
+            df = df[df[PERMIT_TYPE].isin(types)]
+
+        # filter based on the area/neighbourhood selected (drop down so only one area/neighbourhood can be selected)
+        area = input.area()
+        if area != "All":
+            df = df[df[AREA] == area] # filter df to only contain selected area
+        
+        return df 
+    
     @render.text
-    def permits_ytd():
-        return "Placeholder value"
+    def permits_to_date():
+        # count of permits based on selected filters/filtered_df
+        return f"{len(filtered_df()):,}"
 
     @render.text
     def avg_days():
-        return "Placeholder value"
+        df = filtered_df()
+
+        applied_date = pd.to_datetime(df[APPLIED_DATE], errors = "coerce")
+        issue_date = pd.to_datetime(df[ISSUE_DATE], errors = "coerce")
+
+        days_taken_to_issue = (issue_date - applied_date).dt.days
+        days_taken_to_issue = days_taken_to_issue.dropna()
+
+        return f"{days_taken_to_issue.mean():.1f} Days"
 
     @render.text
     def trend_placeholder():
@@ -238,12 +289,52 @@ def server(input, output, session):
             "for the selected filters."
         )
 
-    @render.text
-    def map_placeholder():
-        return (
-            "Placeholder: add interactive neighbourhood map showing permit activity "
-            "intensity."
-        )
+    @reactive.calc
+    def map_df():
+        df = filtered_df()
+        df = df.dropna(subset=['geo_point_2d'])
+
+        coords = df['geo_point_2d'].astype(str).str.split(',', expand=True)
+        df = df.copy()
+        df['lat'] = pd.to_numeric(coords[0].str.strip(), errors='coerce')
+        df['lon'] = pd.to_numeric(coords[1].str.strip(), errors='coerce')
+        df = df.dropna(subset=['lat', 'lon'])
+
+        grouped = df.groupby(AREA).agg(
+            permit_count=('lat', 'size'),
+            lat=('lat', 'mean'),
+            lon=('lon', 'mean')
+        ).reset_index()
+
+        return grouped
+
+    @render_widget
+    def neighbourhood_map():
+        df = map_df()
+
+        center = (49.26, -123.12)
+        m = ipyleaflet.Map(center=center, zoom=12, layout={'height': '400px'})
+
+        if df.empty:
+            return m
+
+        max_count = df['permit_count'].max()
+
+        for _, row in df.iterrows():
+            radius = max(5, int((row['permit_count'] / max_count) * 40))
+            marker = ipyleaflet.CircleMarker(
+                location=(row['lat'], row['lon']),
+                radius=radius,
+                color='#2d2aa8',
+                fill_color='#4d4a95',
+                fill_opacity=0.6,
+                weight=2,
+            )
+            popup_content = HTML(value=f"<b>{row[AREA]}</b><br>Permits: {row['permit_count']:,}")
+            marker.popup = popup_content
+            m.add(marker)
+
+        return m
 
 
 app = App(app_ui, server)
