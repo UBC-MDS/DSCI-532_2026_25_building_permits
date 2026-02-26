@@ -4,26 +4,29 @@ from shinywidgets import output_widget, render_widget
 import pandas as pd
 import ipyleaflet
 from ipywidgets import HTML
+import matplotlib.pyplot as plt
 
-# declare the column names for each filter
+# Declare the column names for each filter
 ISSUE_DATE = 'IssueDate'
 APPLIED_DATE = 'PermitNumberCreatedDate'
 AREA = 'GeoLocalArea'
 PERMIT_TYPE = 'TypeOfWork'
 
-# read in the df 
-permits_df = pd.read_csv('data/raw/issued-building-permits.csv', sep = ';', encoding = 'utf-8')
+# Read in the data
+permits_df = pd.read_csv('data/raw/issued-building-permits.csv',
+                         sep=';',
+                         encoding='utf-8')
 
-# standarsize dates and strip whitespace for values we want to filter on 
+# Standarsize dates and strip whitespace for values we want to filter on
 permits_df[ISSUE_DATE] = pd.to_datetime(permits_df[ISSUE_DATE])
 permits_df[PERMIT_TYPE] = permits_df[PERMIT_TYPE].astype(str).str.strip()
 
-# find the minimum and maximum issue date dynamically from the data 
+# Find the minimum and maximum issue date dynamically from the data
 EARLIEST_ISSUE_DATE = permits_df[ISSUE_DATE].min().date()
 LATEST_ISSUE_DATE = permits_df[ISSUE_DATE].max().date()
 
-# find the unique areas/neighbourhoods from the df 
-areas = sorted( # sorted returns a list
+# Find the unique areas/neighbourhoods from the data
+areas = sorted(
     permits_df[AREA]
     .dropna()
     .astype(str)
@@ -32,12 +35,12 @@ areas = sorted( # sorted returns a list
 
 AREA_CHOICES = ['All'] + areas
 
-# find the unique permit types to pass in to the sidebar filter below 
+# Find the unique permit types to pass in to the sidebar filter below
 TYPE_CHOICES = sorted(
     permits_df[PERMIT_TYPE]
     .dropna()
     .astype(str)
-    .str.strip() # strip all whitespace (pandas Series so we can use .str)
+    .str.strip()
     .unique()
 )
 
@@ -151,8 +154,8 @@ app_ui = ui.page_fluid(
           display: block;
         }
 
-        #trend_placeholder,
-        #top_neighbourhoods_placeholder {
+        #permit_volume_trend,
+        #top_neighbourhoods {
           border: 1px dashed #a7b0d2;
           border-radius: 8px;
           padding: 14px;
@@ -163,7 +166,8 @@ app_ui = ui.page_fluid(
         """
     ),
     ui.panel_title(
-        "Vancouver Building Permits: Trends, Processing Times, and Neighbourhood Activity"
+        "Vancouver Building Permits: Trends, Processing Times,"
+        "and Neighbourhood Activity"
     ),
     ui.layout_sidebar(
         ui.sidebar(
@@ -172,7 +176,7 @@ app_ui = ui.page_fluid(
                 label="Permit issued date range",
                 start=EARLIEST_ISSUE_DATE,
                 end=LATEST_ISSUE_DATE,
-                min=EARLIEST_ISSUE_DATE, # prevent user from selecting dates from outside the earliest and latest permit issuance dates
+                min=EARLIEST_ISSUE_DATE,
                 max=LATEST_ISSUE_DATE
             ),
             ui.input_checkbox_group(
@@ -193,8 +197,8 @@ app_ui = ui.page_fluid(
         ),
         ui.layout_columns(
             ui.card(
-                ui.card_header("Permit Volume Over Time + Forecast"),
-                ui.output_text("trend_placeholder"),
+                ui.card_header("Permit Volume Over Time"),
+                ui.output_plot("permit_volume_trend"),
                 full_screen=True,
             ),
             ui.value_box("Permits Issued", ui.output_text("permits_to_date")),
@@ -205,7 +209,7 @@ app_ui = ui.page_fluid(
         ui.layout_columns(
             ui.card(
                 ui.card_header("Top Neighbourhoods by Permit Volume"),
-                ui.output_text("top_neighbourhoods_placeholder"),
+                ui.output_text("top_neighbourhoods"),
                 full_screen=True,
             ),
             ui.card(
@@ -238,54 +242,68 @@ def server(input, output, session):
     def filtered_df():
         df = permits_df.copy()
 
-        # filter based on the inputted date
+        # Filter based on the inputted date
         start, end = input.date_range()
         start = pd.to_datetime(start)
         end = pd.to_datetime(end)
         
-        # filter for rows between the start and end date (mutually inclusive)
+        # Filter for rows between the start and end date (mutually inclusive)
         df = df[(df[ISSUE_DATE] >= start) & (df[ISSUE_DATE] <= end)]
 
-        # filter the df so it only contains the permit types checked off
+        # Filter the df so it only contains the permit types checked off
         types = list(input.checkbox_group())
         if types: 
             df = df[df[PERMIT_TYPE].isin(types)]
 
-        # filter based on the area/neighbourhood selected (drop down so only one area/neighbourhood can be selected)
+        # Filter based on the area/neighbourhood selected (drop down so only
+        # one area/neighbourhood can be selected)
         area = input.area()
         if area != "All":
-            df = df[df[AREA] == area] # filter df to only contain selected area
+            # Filter df to only contain selected area
+            df = df[df[AREA] == area]
         
-        return df 
+        return df
     
     @render.text
     def permits_to_date():
-        # count of permits based on selected filters/filtered_df
+        # Count of permits based on selected filters/filtered_df
         return f"{len(filtered_df()):,}"
 
     @render.text
     def avg_days():
         df = filtered_df()
 
-        applied_date = pd.to_datetime(df[APPLIED_DATE], errors = "coerce")
-        issue_date = pd.to_datetime(df[ISSUE_DATE], errors = "coerce")
+        applied_date = pd.to_datetime(df[APPLIED_DATE], errors="coerce")
+        issue_date = pd.to_datetime(df[ISSUE_DATE], errors="coerce")
 
         days_taken_to_issue = (issue_date - applied_date).dt.days
         days_taken_to_issue = days_taken_to_issue.dropna()
 
         return f"{days_taken_to_issue.mean():.1f} Days"
 
-    @render.text
-    def trend_placeholder():
-        return (
-            "Placeholder: add time-series chart for monthly permit volume by type "
-            "(with optional forecast)."
+    @render.plot
+    def permit_volume_trend():
+        df = filtered_df().copy()
+        df[ISSUE_DATE] = pd.to_datetime(df[ISSUE_DATE])
+
+        monthly = df.groupby(df[ISSUE_DATE].dt.to_period('M')).size()
+
+        start, end = input.date_range()
+
+        fig, ax = plt.subplots()
+        monthly.plot(ax=ax)
+        ax.set_xlim(
+            pd.Period(start, freq='M'),
+            pd.Period(end, freq='M')
         )
+        ax.set_xlabel('Year')
+        ax.set_ylabel('Count')
+        return fig
 
     @render.text
-    def top_neighbourhoods_placeholder():
+    def top_neighbourhoods():
         return (
-            "Placeholder: add bar chart of top neighbourhoods by permit volume "
+            "Placeholder: add bar chart of top neighbourhoods by permit volume"
             "for the selected filters."
         )
 
@@ -330,7 +348,7 @@ def server(input, output, session):
                 fill_opacity=0.6,
                 weight=2,
             )
-            popup_content = HTML(value=f"<b>{row[AREA]}</b><br>Permits: {row['permit_count']:,}")
+            popup_content = HTML(value=f"<b>{row[AREA]}</b><br>Permits:{row['permit_count']:,}")
             marker.popup = popup_content
             m.add(marker)
 
