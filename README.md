@@ -2,6 +2,10 @@
 
 Dashboard built using Python Shiny that explores Building Permit data from the City of Vancouver, starting in 2017. The dashboard allows users to analyze permit volume trends across time and neighbourhood, and show the number of permits issued and average processing time of these permits for this year up until the current date. An interactive map allows for users to click on and interactively filter for specific neighbourhods. Interactive filters such as date range, type of work for the permit, and neighbourhood give city planners and stakeholders a high-level overview of building permit development trends across Vancouver, Canada.
 
+## Deployments
+[Stable Build]<https://connect.posit.cloud/oswingan/content/019c9398-bb34-8e51-81f9-ab408b2265d5>
+[Preview Build]<https://connect.posit.cloud/oswingan/content/019c939c-0035-bdf2-f7f3-3c47ab720907>
+
 ## Get Started
 
 ### 1. Clone the repository
