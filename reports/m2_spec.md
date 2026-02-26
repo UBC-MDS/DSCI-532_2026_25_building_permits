@@ -5,10 +5,12 @@
 | # | Job Story | Status | Notes |
 |---|-----------|--------|-------|
 | 1 | As a real estate developer, I want to visually see permit distribution per neighbourhood on an interactive map I can click/filter on. This will allow me to identify neighbourhoods with high development activity and potential profitable investment areas. | ✅ Implemented | map_df and neighbourhood_map implemented using ipyleaflet |
-| 2 | As a real estate developer, I want to see the average time it takes for a permit to be approved by the city (issued date minus applied date) by neighbourhood and category so that I can see overall approval timelines when planning a development project. | Pending M2 | Requires calculation of average processing time from the filtered_df. |
-| 3 | As an end user, when I adjust the date range, permit type, or neighbourhood filters, I want all the dashboard visuals to update dynamically so I can change my view of the dashboard on the fly. | Pending M2 | Requires reactive calculation using filtered_df. |
-| 4 | When analyzing development activity in Vancouver, I want to see the total number of permits issued within my preferred filters so I can quickly gauge the construction activity for specific times and areas. | Pending M2 | Requires filtered_df + permits_to_date.
-| 5 | As an end user of the dashboard, I want a fast way to reset my filters so that I can reset my filters on demand and return to a full city view or show stakeholders different development behaviour on the fly based on different filters. | Pending M2 | Requires reset_filters reactive effect|
+| 2 | As a real estate developer, I want to see the average time it takes for a permit to be approved by the city (issued date minus applied date) by neighbourhood and category so that I can see overall approval timelines when planning a development project. |  ✅ Implemented |  Calculates average processing time from the filtered_df. |
+| 3 | As an end user, when I adjust the date range, permit type, or neighbourhood filters, I want all the dashboard visuals to update dynamically so I can change my view of the dashboard on the fly. | ✅ Implemented | Components update based on user inputted filters from the reactive calculation of filtered_df. |
+| 4 | When analyzing development activity in Vancouver, I want to see the total number of permits issued within my preferred filters so I can quickly gauge the construction activity for specific times and areas. | ✅ Implemented | Calculates permits_to_date from filtered_df. 
+| 5 | As an end user of the dashboard, I want a fast way to reset my filters so that I can reset my filters on demand and return to a full city view or show stakeholders different development behaviour on the fly based on different filters. | ✅ Implemented | reset_filters reactive effect successfully resets all filters in sidebar. |
+| 6 | As a real estate agent, I want a way to see the count of permits granted per neighbourhood over time with a forecast so that I can suggest my clients to purchase in rapidly developing areas. The permit volume over time with an estimated forecast of future permit volume for my specfic filters will let me spot future trends and predict neighbourhoods that might have more growth in the future. | 🟡 In Progress | Will implement permit_volume_over_time_graph output using monthly outputs from filtered_df. |
+| 7 | As a real estate agent, I want a way to see a quick summary of the top neighbourhoods that have the highest count of permits granted. This will let me see the current neighbourhoods that are being developed in the most. | 🟡 In Progress | Will implement top_neighbourhoods_by_permit_volume_graph output using grouped neighbourhood and permit volume counts that are sorted in descending order from filtered_df. |
 
 ### 2.2: Component Inventory 
 
@@ -23,6 +25,8 @@
 | avg_days | Output | `ui.output_text()` + `@render.text` | `filtered_df` | #2 |
 | map_df | Reactive calculation | `@reactive.calc` | `filtered_df` | #1 |
 | neighbourhood_map | Output | `ui.output_widget()` + `@render_widget` | `map_df` | #1 |
+| permit_volume_over_time_graph | Output | `ui.output_widget()` + `@render_widget` | `filtered_df` | #6 |
+| top_neighbourhoods_by_permit_volume_graph | Output | `ui.output_widget()` + `@render_widget` | `filtered_df` | #7 |
 
 ### 2.3: Reactivity Diagram 
 
