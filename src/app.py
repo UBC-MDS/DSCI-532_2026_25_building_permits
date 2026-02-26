@@ -3,6 +3,7 @@ from shiny import App, reactive, render, ui
 from shinywidgets import output_widget, render_widget
 import pandas as pd
 import ipyleaflet
+from ipywidgets import HTML
 
 # declare the column names for each filter
 ISSUE_DATE = 'IssueDate'
@@ -329,11 +330,8 @@ def server(input, output, session):
                 fill_opacity=0.6,
                 weight=2,
             )
-            marker.popup = ipyleaflet.Popup(
-                child=ipyleaflet.HTML(
-                    value=f"<b>{row[AREA]}</b><br>Permits: {row['permit_count']:,}"
-                ),
-            )
+            popup_content = HTML(value=f"<b>{row[AREA]}</b><br>Permits: {row['permit_count']:,}")
+            marker.popup = popup_content
             m.add(marker)
 
         return m
