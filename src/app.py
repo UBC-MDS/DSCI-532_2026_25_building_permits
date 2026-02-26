@@ -1,6 +1,8 @@
 from datetime import date
 from shiny import App, reactive, render, ui
+from shinywidgets import output_widget, render_widget
 import pandas as pd
+import ipyleaflet
 
 # declare the column names for each filter
 ISSUE_DATE = 'IssueDate'
@@ -143,14 +145,13 @@ app_ui = ui.page_fluid(
           min-height: 220px;
         }
 
-        #map_placeholder {
-          min-height: 360px;
+        #neighbourhood_map {
+          min-height: 400px;
           display: block;
         }
 
         #trend_placeholder,
-        #top_neighbourhoods_placeholder,
-        #map_placeholder {
+        #top_neighbourhoods_placeholder {
           border: 1px dashed #a7b0d2;
           border-radius: 8px;
           padding: 14px;
@@ -208,7 +209,7 @@ app_ui = ui.page_fluid(
             ),
             ui.card(
                 ui.card_header("Building Permit Activity By Neighbourhood"),
-                ui.output_text("map_placeholder"),
+                output_widget("neighbourhood_map"),
                 full_screen=True,
             ),
             col_widths=[6, 6],
@@ -287,12 +288,55 @@ def server(input, output, session):
             "for the selected filters."
         )
 
-    @render.text
-    def map_placeholder():
-        return (
-            "Placeholder: add interactive neighbourhood map showing permit activity "
-            "intensity."
-        )
+    @reactive.calc
+    def map_df():
+        df = filtered_df()
+        df = df.dropna(subset=['geo_point_2d'])
+
+        coords = df['geo_point_2d'].astype(str).str.split(',', expand=True)
+        df = df.copy()
+        df['lat'] = pd.to_numeric(coords[0].str.strip(), errors='coerce')
+        df['lon'] = pd.to_numeric(coords[1].str.strip(), errors='coerce')
+        df = df.dropna(subset=['lat', 'lon'])
+
+        grouped = df.groupby(AREA).agg(
+            permit_count=('lat', 'size'),
+            lat=('lat', 'mean'),
+            lon=('lon', 'mean')
+        ).reset_index()
+
+        return grouped
+
+    @render_widget
+    def neighbourhood_map():
+        df = map_df()
+
+        center = (49.26, -123.12)
+        m = ipyleaflet.Map(center=center, zoom=12, layout={'height': '400px'})
+
+        if df.empty:
+            return m
+
+        max_count = df['permit_count'].max()
+
+        for _, row in df.iterrows():
+            radius = max(5, int((row['permit_count'] / max_count) * 40))
+            marker = ipyleaflet.CircleMarker(
+                location=(row['lat'], row['lon']),
+                radius=radius,
+                color='#2d2aa8',
+                fill_color='#4d4a95',
+                fill_opacity=0.6,
+                weight=2,
+            )
+            marker.popup = ipyleaflet.Popup(
+                child=ipyleaflet.HTML(
+                    value=f"<b>{row[AREA]}</b><br>Permits: {row['permit_count']:,}"
+                ),
+            )
+            m.add(marker)
+
+        return m
 
 
 app = App(app_ui, server)
