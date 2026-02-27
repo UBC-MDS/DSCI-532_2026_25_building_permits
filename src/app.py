@@ -234,8 +234,7 @@ def server(input, output, session):
         )
         ui.update_checkbox_group(
             "checkbox_group",
-            selected=["__NONE__"],
-            session = session,
+            selected=[],
         )
         ui.update_select("area", selected="All", session = session)
 
@@ -253,12 +252,9 @@ def server(input, output, session):
 
         # Filter the df so it only contains the permit types checked off
         types = list(input.checkbox_group())
-
-        # if there are no types checked off, return an empty df
         if len(types) == 0:
             return df.iloc[0:0]
-        else:
-            df = df[df[PERMIT_TYPE].isin(types)]
+        df = df[df[PERMIT_TYPE].isin(types)]
 
         # Filter based on the area/neighbourhood selected (drop down so only
         # one area/neighbourhood can be selected)
