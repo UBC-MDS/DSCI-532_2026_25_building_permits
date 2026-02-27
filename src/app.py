@@ -6,6 +6,8 @@ import ipyleaflet
 from ipywidgets import HTML
 import altair as alt
 
+alt.themes.enable("latimes")
+
 # Declare the column names for each filter
 ISSUE_DATE = 'IssueDate'
 APPLIED_DATE = 'PermitNumberCreatedDate'
@@ -43,6 +45,7 @@ TYPE_CHOICES = sorted(
     .str.strip()
     .unique()
 )
+
 
 app_ui = ui.page_fluid(
     ui.tags.style(
@@ -208,8 +211,9 @@ app_ui = ui.page_fluid(
         ),
         ui.layout_columns(
             ui.card(
-                ui.card_header("Top Neighbourhoods by Permit Volume"),
-                ui.output_text("top_neighbourhoods"),
+                ui.card_header("Top Neighborhoods by Permit Volume"),
+                ui.input_slider("top_n", "Number of Neighborhoods", min=5, max=20, value=5),
+                output_widget("top_neighborhoods"),
                 full_screen=True,
             ),
             ui.card(
@@ -299,19 +303,45 @@ def server(input, output, session):
             alt.Chart(monthly)
             .mark_line()
             .encode(
-                x=alt.X('month:T', scale=alt.Scale(domain=[str(start), str(end)]), title='Year'),
-                y=alt.Y('count:Q', title='Count'),
+                x=alt.X('month:T', scale=alt.Scale(domain=[str(start), str(end)]), title='Year',
+                        axis=alt.Axis(titleFontWeight='bold')),
+                y=alt.Y('count:Q', title='Count',
+                        axis=alt.Axis(titleFontWeight='bold')),
             )
+            .properties(background="transparent")
+            .configure_view(strokeWidth=0, fill="transparent")
+            .mark_line(color="#2d2aa8")
         )
 
         return chart
 
-    @render.text
-    def top_neighbourhoods():
-        return (
-            "Placeholder: add bar chart of top neighbourhoods by permit volume"
-            "for the selected filters."
+    @render_widget
+    def top_neighborhoods():
+        df = filtered_df().copy()
+        n = input.top_n()
+
+        top = (
+            df.groupby('GeoLocalArea')
+            .size()
+            .reset_index(name='count')
+            .nlargest(n, 'count')
+            .sort_values('count', ascending=False)
         )
+
+        chart = (
+            alt.Chart(top)
+            .mark_bar()
+            .encode(
+                x=alt.X('count:Q', title='Permit Count'),
+                y=alt.Y('GeoLocalArea:N', sort='-x', title='Neighborhood',
+                        axis=alt.Axis(titleFontWeight='bold')),
+                tooltip=['GeoLocalArea', 'count']
+            )
+            .properties(background="transparent")
+            .configure_view(strokeWidth=0, fill="transparent")
+            .configure_mark(color="#2d2aa8")
+        )
+        return chart
 
     @reactive.calc
     def map_df():
