@@ -1,10 +1,12 @@
 from datetime import date
 from shiny import App, reactive, render, ui
-from shinywidgets import output_widget, render_widget
+from shinywidgets import output_widget, render_widget, render_altair
 import pandas as pd
 import ipyleaflet
 from ipywidgets import HTML
-import matplotlib.pyplot as plt
+import altair as alt
+
+alt.themes.enable("latimes")
 
 # Declare the column names for each filter
 ISSUE_DATE = 'IssueDate'
@@ -43,6 +45,7 @@ TYPE_CHOICES = sorted(
     .str.strip()
     .unique()
 )
+
 
 app_ui = ui.page_fluid(
     ui.tags.style(
@@ -198,7 +201,7 @@ app_ui = ui.page_fluid(
         ui.layout_columns(
             ui.card(
                 ui.card_header("Permit Volume Over Time"),
-                ui.output_plot("permit_volume_trend"),
+                output_widget("permit_volume_trend"),
                 full_screen=True,
             ),
             ui.value_box("Permits Issued", ui.output_text("permits_to_date")),
@@ -208,8 +211,9 @@ app_ui = ui.page_fluid(
         ),
         ui.layout_columns(
             ui.card(
-                ui.card_header("Top Neighbourhoods by Permit Volume"),
-                ui.output_text("top_neighbourhoods"),
+                ui.card_header("Top Neighborhoods by Permit Volume"),
+                ui.input_slider("top_n", "Number of Neighborhoods", min=5, max=20, value=5),
+                output_widget("top_neighborhoods"),
                 full_screen=True,
             ),
             ui.card(
@@ -246,13 +250,13 @@ def server(input, output, session):
         start, end = input.date_range()
         start = pd.to_datetime(start)
         end = pd.to_datetime(end)
-        
+
         # Filter for rows between the start and end date (mutually inclusive)
         df = df[(df[ISSUE_DATE] >= start) & (df[ISSUE_DATE] <= end)]
 
         # Filter the df so it only contains the permit types checked off
         types = list(input.checkbox_group())
-        if types: 
+        if types:
             df = df[df[PERMIT_TYPE].isin(types)]
 
         # Filter based on the area/neighbourhood selected (drop down so only
@@ -261,9 +265,9 @@ def server(input, output, session):
         if area != "All":
             # Filter df to only contain selected area
             df = df[df[AREA] == area]
-        
+
         return df
-    
+
     @render.text
     def permits_to_date():
         # Count of permits based on selected filters/filtered_df
@@ -281,31 +285,63 @@ def server(input, output, session):
 
         return f"{days_taken_to_issue.mean():.1f} Days"
 
-    @render.plot
+    @render_altair
     def permit_volume_trend():
         df = filtered_df().copy()
         df[ISSUE_DATE] = pd.to_datetime(df[ISSUE_DATE])
+        df['month'] = df[ISSUE_DATE].dt.to_period('M').dt.to_timestamp()
 
-        monthly = df.groupby(df[ISSUE_DATE].dt.to_period('M')).size()
+        monthly = (
+            df.groupby('month')
+            .size()
+            .reset_index(name='count')
+        )
 
         start, end = input.date_range()
 
-        fig, ax = plt.subplots()
-        monthly.plot(ax=ax)
-        ax.set_xlim(
-            pd.Period(start, freq='M'),
-            pd.Period(end, freq='M')
+        chart = (
+            alt.Chart(monthly)
+            .mark_line()
+            .encode(
+                x=alt.X('month:T', scale=alt.Scale(domain=[str(start), str(end)]), title='Year',
+                        axis=alt.Axis(titleFontWeight='bold')),
+                y=alt.Y('count:Q', title='Count',
+                        axis=alt.Axis(titleFontWeight='bold')),
+            )
+            .properties(background="transparent")
+            .configure_view(strokeWidth=0, fill="transparent")
+            .mark_line(color="#2d2aa8")
         )
-        ax.set_xlabel('Year')
-        ax.set_ylabel('Count')
-        return fig
 
-    @render.text
-    def top_neighbourhoods():
-        return (
-            "Placeholder: add bar chart of top neighbourhoods by permit volume"
-            "for the selected filters."
+        return chart
+
+    @render_widget
+    def top_neighborhoods():
+        df = filtered_df().copy()
+        n = input.top_n()
+
+        top = (
+            df.groupby('GeoLocalArea')
+            .size()
+            .reset_index(name='count')
+            .nlargest(n, 'count')
+            .sort_values('count', ascending=False)
         )
+
+        chart = (
+            alt.Chart(top)
+            .mark_bar()
+            .encode(
+                x=alt.X('count:Q', title='Permit Count'),
+                y=alt.Y('GeoLocalArea:N', sort='-x', title='Neighborhood',
+                        axis=alt.Axis(titleFontWeight='bold')),
+                tooltip=['GeoLocalArea', 'count']
+            )
+            .properties(background="transparent")
+            .configure_view(strokeWidth=0, fill="transparent")
+            .configure_mark(color="#2d2aa8")
+        )
+        return chart
 
     @reactive.calc
     def map_df():
