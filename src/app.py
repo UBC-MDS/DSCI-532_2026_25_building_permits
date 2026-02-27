@@ -1,6 +1,7 @@
 from datetime import date
 from shiny import App, reactive, render, ui
 from shinywidgets import output_widget, render_widget, render_altair
+from faicons import icon_svg
 import pandas as pd
 import ipyleaflet
 from ipywidgets import HTML
@@ -170,31 +171,38 @@ app_ui = ui.page_fluid(
 
         /* Value boxes */
         .bslib-value-box {
-          background: var(--card-bg);
-          border: 1px solid var(--card-border);
           border-radius: var(--radius);
           box-shadow: var(--shadow-sm);
-          min-height: 120px;
+          min-height: 110px;
           transition: box-shadow 0.2s, transform 0.2s;
+          border: none;
         }
         .bslib-value-box:hover {
           box-shadow: var(--shadow-md);
           transform: translateY(-2px);
         }
         .bslib-value-box .value-box-title {
-          color: var(--text-secondary);
           font-size: 0.76rem;
           font-weight: 600;
           text-transform: uppercase;
           letter-spacing: 0.5px;
+          opacity: 0.85;
         }
         .bslib-value-box .value-box-value {
           font-size: 1.85rem;
           font-weight: 800;
-          background: linear-gradient(135deg, #6C5CE7, #0984E3);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
+        }
+        .bslib-value-box .value-box-showcase {
+          font-size: 2rem;
+          opacity: 0.2;
+        }
+        .vb-purple {
+          background: linear-gradient(135deg, #6C5CE7, #a855f7) !important;
+          color: #fff !important;
+        }
+        .vb-purple .value-box-title,
+        .vb-purple .value-box-value {
+          color: #fff !important;
         }
 
         /* Cards */
@@ -309,19 +317,29 @@ app_ui = ui.page_fluid(
             open="desktop",
             width=280,
         ),
-        ui.layout_columns(
-            ui.layout_column_wrap(
-                ui.value_box("Permits Issued", ui.output_text("permits_to_date")),
-                ui.value_box("Avg Processing Time", ui.output_text("avg_days")),
-                width=1,
-                class_="kpi-wrap",
+        ui.layout_column_wrap(
+            ui.value_box(
+                "Permits Issued",
+                ui.output_text("permits_to_date"),
+                showcase=icon_svg("file-lines", width="40px"),
+                theme="primary",
             ),
+            ui.value_box(
+                "Avg Processing Time",
+                ui.output_text("avg_days"),
+                showcase=icon_svg("clock", width="40px"),
+                class_="vb-purple",
+            ),
+            width=1/2,
+            class_="kpi-wrap",
+        ),
+        ui.layout_columns(
             ui.card(
                 ui.card_header("Permit Volume Over Time"),
                 output_widget("permit_volume_trend"),
                 full_screen=True,
             ),
-            col_widths={"sm": [12, 12], "lg": [3, 9]},
+            col_widths=[12],
             fill=False,
         ),
         ui.layout_columns(
