@@ -183,7 +183,7 @@ app_ui = ui.page_fluid(
                 id="checkbox_group",
                 label="Type of work",
                 choices=TYPE_CHOICES,
-                selected=TYPE_CHOICES,
+                selected=[],
             ),
             ui.input_select(
                 id="area",
@@ -234,9 +234,10 @@ def server(input, output, session):
         )
         ui.update_checkbox_group(
             "checkbox_group",
-            selected=TYPE_CHOICES,
+            selected=["__NONE__"],
+            session = session,
         )
-        ui.update_select("area", selected="All")
+        ui.update_select("area", selected="All", session = session)
 
     @reactive.calc
     def filtered_df():
@@ -252,7 +253,11 @@ def server(input, output, session):
 
         # Filter the df so it only contains the permit types checked off
         types = list(input.checkbox_group())
-        if types: 
+
+        # if there are no types checked off, return an empty df
+        if len(types) == 0:
+            return df.iloc[0:0]
+        else:
             df = df[df[PERMIT_TYPE].isin(types)]
 
         # Filter based on the area/neighbourhood selected (drop down so only
@@ -278,9 +283,13 @@ def server(input, output, session):
 
         days_taken_to_issue = (issue_date - applied_date).dt.days
         days_taken_to_issue = days_taken_to_issue.dropna()
-
-        return f"{days_taken_to_issue.mean():.1f} Days"
-
+        mean_days = days_taken_to_issue.mean()
+        
+        if pd.isna(mean_days):
+          return "0 Days"
+        else:
+          return f"{mean_days:.1f} Days"
+        
     @render.plot
     def permit_volume_trend():
         df = filtered_df().copy()
