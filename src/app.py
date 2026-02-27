@@ -186,7 +186,7 @@ app_ui = ui.page_fluid(
                 id="checkbox_group",
                 label="Type of work",
                 choices=TYPE_CHOICES,
-                selected=TYPE_CHOICES,
+                selected=[],
             ),
             ui.input_select(
                 id="area",
@@ -238,7 +238,7 @@ def server(input, output, session):
         )
         ui.update_checkbox_group(
             "checkbox_group",
-            selected=TYPE_CHOICES,
+            selected=[],
         )
         ui.update_select("area", selected="All")
 
@@ -256,8 +256,12 @@ def server(input, output, session):
 
         # Filter the df so it only contains the permit types checked off
         types = list(input.checkbox_group())
-        if types:
-            df = df[df[PERMIT_TYPE].isin(types)]
+
+        # if no types are selected, return an empty df 
+        if len(types) == 0:
+            return df.iloc[0:0]
+
+        df = df[df[PERMIT_TYPE].isin(types)]
 
         # Filter based on the area/neighbourhood selected (drop down so only
         # one area/neighbourhood can be selected)
@@ -276,7 +280,9 @@ def server(input, output, session):
     @render.text
     def avg_days():
         df = filtered_df()
-
+        if df.empty:
+            return "0 Days"
+        
         applied_date = pd.to_datetime(df[APPLIED_DATE], errors="coerce")
         issue_date = pd.to_datetime(df[ISSUE_DATE], errors="coerce")
 
@@ -346,6 +352,11 @@ def server(input, output, session):
     @reactive.calc
     def map_df():
         df = filtered_df()
+
+        # if empty, return an empty df with expected columns
+        if df.empty:
+            return pd.DataFrame(columns=[AREA, "permit_count", "lat", "lon"])
+
         df = df.dropna(subset=['geo_point_2d'])
 
         coords = df['geo_point_2d'].astype(str).str.split(',', expand=True)
