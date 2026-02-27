@@ -6,3 +6,4 @@ shiny==1.5.1
 shinywidgets==0.7.1
 ipyleaflet==0.20.0
 altair==6.0.0
+faicons==0.2.2
