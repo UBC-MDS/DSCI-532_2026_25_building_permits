@@ -119,9 +119,22 @@ app_ui = ui.page_fluid(
         }
 
         .shiny-input-checkboxgroup .shiny-options-group { margin-top: 6px; }
+        .shiny-input-checkboxgroup .checkbox {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          margin-bottom: 4px;
+        }
+        .shiny-input-checkboxgroup .checkbox input[type="checkbox"] {
+          margin: 0;
+          flex-shrink: 0;
+        }
+        .shiny-input-checkboxgroup .checkbox label,
         .shiny-input-checkboxgroup label {
           font-size: 0.82rem;
           color: var(--text-secondary);
+          margin-bottom: 0;
+          line-height: 1.3;
         }
 
         .form-control, .form-select {
@@ -284,7 +297,7 @@ app_ui = ui.page_fluid(
                 id="checkbox_group",
                 label="Type of Work",
                 choices=TYPE_CHOICES,
-                selected=[],
+                selected=TYPE_CHOICES,
             ),
             ui.input_select(
                 id="area",
@@ -346,9 +359,10 @@ def server(input, output, session):
         )
         ui.update_checkbox_group(
             "checkbox_group",
-            selected=[],
+            selected=TYPE_CHOICES,
         )
         ui.update_select("area", selected="All")
+        ui.update_slider("top_n", value=5)
 
     @reactive.calc
     def filtered_df():
