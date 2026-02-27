@@ -229,8 +229,11 @@ app_ui = ui.page_fluid(
         }
         .app-footer a { color: var(--accent); text-decoration: none; }
 
-        /* Tablet */
+        /* Tablet and mobile: value boxes side by side */
         @media (max-width: 992px) {
+          .kpi-wrap {
+            grid-template-columns: 1fr 1fr !important;
+          }
           h2 { font-size: 1.35rem; margin: 14px 0 8px; }
           .bslib-value-box .value-box-value { font-size: 1.4rem; }
           .bslib-value-box { min-height: 100px; }
@@ -298,6 +301,7 @@ app_ui = ui.page_fluid(
                 ui.value_box("Permits Issued", ui.output_text("permits_to_date")),
                 ui.value_box("Avg Processing Time", ui.output_text("avg_days")),
                 width=1,
+                class_="kpi-wrap",
             ),
             ui.card(
                 ui.card_header("Permit Volume Over Time"),
