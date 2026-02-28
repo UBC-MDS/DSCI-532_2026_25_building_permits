@@ -305,7 +305,7 @@ app_ui = ui.page_fluid(
                 id="checkbox_group",
                 label="Type of Work",
                 choices=TYPE_CHOICES,
-                selected=TYPE_CHOICES,
+                selected=[],
             ),
             ui.input_select(
                 id="area",
@@ -377,7 +377,7 @@ def server(input, output, session):
         )
         ui.update_checkbox_group(
             "checkbox_group",
-            selected=TYPE_CHOICES,
+            selected=[],
         )
         ui.update_select("area", selected="All")
         ui.update_slider("top_n", value=5)
