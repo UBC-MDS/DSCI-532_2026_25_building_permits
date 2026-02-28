@@ -12,7 +12,7 @@ This dashboard enables real estate developers, agents, city planners, and stakeh
 
 ## Demo
 
-![Vancouver Building Permits dashboard demo](img/Demo.gif)
+![Vancouver Building Permits dashboard demo](img/demo.gif)
 
 ## Motivation
 
