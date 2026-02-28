@@ -305,7 +305,7 @@ app_ui = ui.page_fluid(
                 id="checkbox_group",
                 label="Type of Work",
                 choices=TYPE_CHOICES,
-                selected=[],
+                selected=TYPE_CHOICES,
             ),
             ui.input_select(
                 id="area",
@@ -377,7 +377,7 @@ def server(input, output, session):
         )
         ui.update_checkbox_group(
             "checkbox_group",
-            selected=[],
+            selected=TYPE_CHOICES,
         )
         ui.update_select("area", selected="All")
         ui.update_slider("top_n", value=5)
@@ -397,7 +397,7 @@ def server(input, output, session):
         # Filter the df so it only contains the permit types checked off
         types = list(input.checkbox_group())
 
-        # if no types are selected, return an empty df 
+        # If the user clears all work types manually, show no matching rows.
         if len(types) == 0:
             return df.iloc[0:0]
 
