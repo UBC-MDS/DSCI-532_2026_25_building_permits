@@ -6,6 +6,12 @@ import pandas as pd
 import ipyleaflet
 from ipywidgets import HTML
 import altair as alt
+import chatlas as clt 
+import os
+from querychat import QueryChat
+from dotenv import load_dotenv
+
+load_dotenv()
 
 alt.themes.enable("latimes")
 
@@ -15,6 +21,7 @@ APPLIED_DATE = 'PermitNumberCreatedDate'
 AREA = 'GeoLocalArea'
 PERMIT_TYPE = 'TypeOfWork'
 
+
 # Read in the data
 permits_df = pd.read_csv('data/raw/issued-building-permits.csv',
                          sep=';',
@@ -23,6 +30,14 @@ permits_df = pd.read_csv('data/raw/issued-building-permits.csv',
 # Standarsize dates and strip whitespace for values we want to filter on
 permits_df[ISSUE_DATE] = pd.to_datetime(permits_df[ISSUE_DATE])
 permits_df[PERMIT_TYPE] = permits_df[PERMIT_TYPE].astype(str).str.strip()
+
+# create the Anthropic chat client using the ANTHROPIC_API_KEY in .env
+chat_client = clt.ChatAnthropic(
+    api_key = os.environ["ANTHROPIC_API_KEY"],
+    model = "claude-haiku-4-5-20251001"
+)
+
+query_chat = QueryChat(permits_df, "building_permits", client = chat_client)
 
 # Find the minimum and maximum issue date dynamically from the data
 EARLIEST_ISSUE_DATE = permits_df[ISSUE_DATE].min().date()
@@ -285,88 +300,145 @@ app_ui = ui.page_fluid(
     ui.panel_title(
         "Vancouver Building Permits"
     ),
-    ui.layout_sidebar(
-        ui.sidebar(
-            ui.tags.div(
-                ui.tags.small(
-                    "Filter by date, work type, and neighbourhood",
-                    style="color: var(--text-muted); display: block; margin-bottom: 16px;",
-                ),
-            ),
-            ui.input_date_range(
-                id="date_range",
-                label="Date Range",
-                start=EARLIEST_ISSUE_DATE,
-                end=LATEST_ISSUE_DATE,
-                min=EARLIEST_ISSUE_DATE,
-                max=LATEST_ISSUE_DATE
-            ),
-            ui.input_checkbox_group(
-                id="checkbox_group",
-                label="Type of Work",
-                choices=TYPE_CHOICES,
-                selected=TYPE_CHOICES,
-            ),
-            ui.input_select(
-                id="area",
-                label="Neighbourhood",
-                choices=AREA_CHOICES,
-                selected="All",
-            ),
-            ui.input_action_button("action_button", "Reset Filters"),
-            open="desktop",
-            width=280,
-        ),
-        ui.layout_column_wrap(
-            ui.value_box(
-                "Permits Issued",
-                ui.output_text("permits_to_date"),
-                showcase=icon_svg("file-lines", width="40px"),
-                theme="primary",
-            ),
-            ui.value_box(
-                "Avg Processing Time",
-                ui.output_text("avg_days"),
-                showcase=icon_svg("clock", width="40px"),
-                class_="vb-purple",
-            ),
-            width=1/2,
-            class_="kpi-wrap",
-        ),
-        ui.layout_columns(
-            ui.card(
-                ui.card_header("Permit Volume Over Time"),
-                output_widget("permit_volume_trend"),
-                full_screen=True,
-            ),
-            col_widths=[12],
-            fill=False,
-        ),
-        ui.layout_columns(
-            ui.card(
-                ui.card_header("Neighbourhood Permit Map"),
-                output_widget("neighbourhood_map"),
-                full_screen=True,
-            ),
-            ui.card(
-                ui.card_header("Top Neighbourhoods"),
-                ui.input_slider("top_n", "Number of Neighbourhoods", min=5, max=20, value=5),
-                output_widget("top_neighborhoods"),
-                full_screen=True,
-            ),
-            col_widths={"sm": [12, 12], "lg": [7, 5]},
-        ),
-        ui.tags.div(
-            "Vancouver Building Permits Dashboard | ",
-            ui.tags.a("GitHub", href="https://github.com/UBC-MDS/DSCI-532_2026_25_building_permits", target="_blank"),
-            " | Data: City of Vancouver Open Data Portal",
-            class_="app-footer",
+    ui.navset_tab(
+      # existing dashboard 
+      ui.nav_panel(
+          "Dashboard",
+          ui.layout_sidebar(
+              ui.sidebar(
+                  ui.tags.div(
+                      ui.tags.small(
+                          "Filter by date, work type, and neighbourhood",
+                          style="color: var(--text-muted); display: block; margin-bottom: 16px;",
+                      ),
+                  ),
+                  ui.input_date_range(
+                      id="date_range",
+                      label="Date Range",
+                      start=EARLIEST_ISSUE_DATE,
+                      end=LATEST_ISSUE_DATE,
+                      min=EARLIEST_ISSUE_DATE,
+                      max=LATEST_ISSUE_DATE
+                  ),
+                  ui.input_checkbox_group(
+                      id="checkbox_group",
+                      label="Type of Work",
+                      choices=TYPE_CHOICES,
+                      selected=TYPE_CHOICES,
+                  ),
+                  ui.input_select(
+                      id="area",
+                      label="Neighbourhood",
+                      choices=AREA_CHOICES,
+                      selected="All",
+                  ),
+                  ui.input_action_button("action_button", "Reset Filters"),
+                  open="desktop",
+                  width=280,
+              ),
+              ui.layout_column_wrap(
+                  ui.value_box(
+                      "Permits Issued",
+                      ui.output_text("permits_to_date"),
+                      showcase=icon_svg("file-lines", width="40px"),
+                      theme="primary",
+                  ),
+                  ui.value_box(
+                      "Avg Processing Time",
+                      ui.output_text("avg_days"),
+                      showcase=icon_svg("clock", width="40px"),
+                      class_="vb-purple",
+                  ),
+                  width=1/2,
+                  class_="kpi-wrap",
+              ),
+              ui.layout_columns(
+                  ui.card(
+                      ui.card_header("Permit Volume Over Time"),
+                      output_widget("permit_volume_trend"),
+                      full_screen=True,
+                  ),
+                  col_widths=[12],
+                  fill=False,
+              ),
+              ui.layout_columns(
+                  ui.card(
+                      ui.card_header("Neighbourhood Permit Map"),
+                      output_widget("neighbourhood_map"),
+                      full_screen=True,
+                  ),
+                  ui.card(
+                      ui.card_header("Top Neighbourhoods"),
+                      ui.input_slider("top_n", "Number of Neighbourhoods", min=5, max=20, value=5),
+                      output_widget("top_neighborhoods"),
+                      full_screen=True,
+                  ),
+                  col_widths={"sm": [12, 12], "lg": [7, 5]},
+              ),
+              ui.tags.div(
+                  "Vancouver Building Permits Dashboard | ",
+                  ui.tags.a("GitHub", href="https://github.com/UBC-MDS/DSCI-532_2026_25_building_permits", target="_blank"),
+                  " | Data: City of Vancouver Open Data Portal",
+                  class_="app-footer",
+              ),
+          ),
+      ),
+
+      # AI tab
+      ui.nav_panel(
+          "AI",
+          ui.layout_columns(
+              
+              ui.card(
+                  ui.card_header("Ask the data"),
+                  query_chat.ui(), # add the querychat UI
+                  full_screen = False,
+                  open = "desktop",
+                  height = "80vh",
+              ),
+
+              # beside the chatbot, put the SQL query like in the docs: https://shiny.posit.co/blog/posts/querychat-python-r/#adding-querychat-to-your-existing-shiny-app
+              ui.layout_columns(
+                  ui.card(
+                      ui.card_header("SQL query"),
+                      ui.output_ui("ai_sql_preview"),
+                      full_screen=False,
+                      height = "25vh",
+                  ),
+                  ui.card(
+                      ui.card_header("Filtered dataframe (fron chat)"),
+                      ui.output_data_frame("ai_df_preview"),
+                      full_screen = False,
+                      height = "55vh",
+                  ),
+                  col_widths=[12, 12],
+              ),
+              col_widths={"lg": [6, 6], "sm": [12, 12]},
+              fill=True,
+          ),
         ),
     ),
 )
 
 
 def server(input, output, session):
+    qc_vals = query_chat.server()
+    
+    @render.ui
+    def ai_sql_preview():
+        sql = qc_vals.sql()
+        if not sql:
+            sql = "SELECT * FROM building_permits"
+        return ui.pre(ui.code(sql))
+    
+    @reactive.calc
+    def ai_df():
+        return qc_vals.df()
+    
+    @render.data_frame
+    def ai_df_preview():
+        return ai_df()
+    
     @reactive.effect
     @reactive.event(input.action_button)
     def _reset_filters():
