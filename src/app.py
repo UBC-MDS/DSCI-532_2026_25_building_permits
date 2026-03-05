@@ -396,41 +396,22 @@ app_ui = ui.page_fluid(
                   open = "desktop",
                   height = "80vh",
               ),
-
-              # beside the chatbot, put the SQL query like in the docs: https://shiny.posit.co/blog/posts/querychat-python-r/#adding-querychat-to-your-existing-shiny-app
-              ui.layout_columns(
-                  ui.card(
-                      ui.card_header("SQL query"),
-                      ui.output_ui("ai_sql_preview"),
-                      full_screen=False,
-                      height = "25vh",
-                  ),
-                  ui.card(
-                      ui.card_header("Filtered dataframe (fron chat)"),
-                      ui.output_data_frame("ai_df_preview"),
-                      full_screen = False,
-                      height = "55vh",
-                  ),
-                  col_widths=[12, 12],
+              ui.card(
+                  ui.card_header("Filtered dataframe (fron chat)"),
+                  ui.output_data_frame("ai_df_preview"),
+                  full_screen = False,
+                  height = "80vh",
               ),
               col_widths={"lg": [6, 6], "sm": [12, 12]},
-              fill=True,
+              fill = True
           ),
-        ),
+      ),
     ),
 )
 
-
 def server(input, output, session):
     qc_vals = query_chat.server()
-    
-    @render.ui
-    def ai_sql_preview():
-        sql = qc_vals.sql()
-        if not sql:
-            sql = "SELECT * FROM building_permits"
-        return ui.pre(ui.code(sql))
-    
+  
     @reactive.calc
     def ai_df():
         return qc_vals.df()
