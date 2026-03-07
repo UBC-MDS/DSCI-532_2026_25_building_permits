@@ -35,10 +35,10 @@ with open('data/raw/local-area-boundary.geojson', encoding='utf-8') as f:
 permits_df[ISSUE_DATE] = pd.to_datetime(permits_df[ISSUE_DATE])
 permits_df[PERMIT_TYPE] = permits_df[PERMIT_TYPE].astype(str).str.strip()
 
-# create the Anthropic chat client using the ANTHROPIC_API_KEY in .env
-chat_client = clt.ChatAnthropic(
-    api_key=os.environ["ANTHROPIC_API_KEY"],
-    model="claude-haiku-4-5-20251001"
+# create the GitHub chat client using the GITHUB_TOKEN in .env
+chat_client = clt.ChatGithub(
+    api_key=os.environ["GITHUB_TOKEN"],
+    model="gpt-4.1-mini"
 )
 
 query_chat = QueryChat(permits_df, "building_permits", client=chat_client)
@@ -436,14 +436,18 @@ app_ui = ui.page_fluid(
             "AI",
             ui.layout_columns(
                 ui.card(
-                    ui.card_header("Ask the data"),
+                    ui.card_header("AI Data Helper Chat"),
                     query_chat.ui(),
                     full_screen=False,
                     height="70vh",
                 ),
                 ui.card(
-                    ui.card_header("Filtered dataframe (from chat)"),
+                    ui.card_header("Filtered DataFrame"),
                     ui.output_data_frame("ai_df_preview"),
+                    ui.download_button(
+                        "download_ai_df",
+                        "Download CSV"
+                    ),
                     full_screen=False,
                     height="70vh",
                 ),
@@ -481,6 +485,10 @@ def server(input, output, session):
     @reactive.calc
     def ai_df():
         return qc_vals.df()
+
+    @render.download(filename=lambda: f"ai_filtered_permits_{date.today()}.csv")
+    def download_ai_df():
+        yield ai_df().to_csv(index=False)
 
     @render.data_frame
     def ai_df_preview():
