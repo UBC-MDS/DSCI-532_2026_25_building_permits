@@ -1,4 +1,6 @@
 from datetime import date
+import copy
+import json
 from shiny import App, reactive, render, ui
 from shinywidgets import output_widget, render_widget, render_altair
 from faicons import icon_svg
@@ -19,6 +21,9 @@ PERMIT_TYPE = 'TypeOfWork'
 permits_df = pd.read_csv('data/raw/issued-building-permits.csv',
                          sep=';',
                          encoding='utf-8')
+
+with open('data/raw/local-area-boundary.geojson', encoding='utf-8') as f:
+    neighbourhood_geojson = json.load(f)
 
 # Standarsize dates and strip whitespace for values we want to filter on
 permits_df[ISSUE_DATE] = pd.to_datetime(permits_df[ISSUE_DATE])
@@ -495,21 +500,13 @@ def server(input, output, session):
 
         # if empty, return an empty df with expected columns
         if df.empty:
-            return pd.DataFrame(columns=[AREA, "permit_count", "lat", "lon"])
+            return pd.DataFrame(columns=[AREA, "permit_count"])
 
-        df = df.dropna(subset=['geo_point_2d'])
-
-        coords = df['geo_point_2d'].astype(str).str.split(',', expand=True)
-        df = df.copy()
-        df['lat'] = pd.to_numeric(coords[0].str.strip(), errors='coerce')
-        df['lon'] = pd.to_numeric(coords[1].str.strip(), errors='coerce')
-        df = df.dropna(subset=['lat', 'lon'])
-
-        grouped = df.groupby(AREA).agg(
-            permit_count=('lat', 'size'),
-            lat=('lat', 'mean'),
-            lon=('lon', 'mean')
-        ).reset_index()
+        grouped = (
+            df.groupby(AREA)
+            .size()
+            .reset_index(name="permit_count")
+        )
 
         return grouped
 
@@ -525,24 +522,64 @@ def server(input, output, session):
             basemap=ipyleaflet.basemaps.CartoDB.Positron,
         )
 
-        if df.empty:
-            return m
+        counts = dict(zip(df[AREA], df["permit_count"])) if not df.empty else {}
 
-        max_count = df['permit_count'].max()
+        geojson_data = copy.deepcopy(neighbourhood_geojson)
+        for feature in geojson_data["features"]:
+            area_name = feature["properties"]["name"]
+            count = int(counts.get(area_name, 0))
+            feature["properties"]["permit_count"] = count
 
-        for _, row in df.iterrows():
-            radius = max(5, int((row['permit_count'] / max_count) * 40))
-            marker = ipyleaflet.CircleMarker(
-                location=(row['lat'], row['lon']),
-                radius=radius,
-                color='#6C5CE7',
-                fill_color='#0984E3',
-                fill_opacity=0.55,
-                weight=2,
-            )
-            popup_content = HTML(value=f"<b>{row[AREA]}</b><br>Permits:{row['permit_count']:,}")
-            marker.popup = popup_content
-            m.add(marker)
+        geo_layer = ipyleaflet.GeoJSON(
+            data=geojson_data,
+            style={
+                "color": "#4B5563",
+                "weight": 1.2,
+                "dashArray": "6 4",
+                "fillColor": "#E5E7EB",
+                "fillOpacity": 0.35,
+            },
+            hover_style={
+                "color": "#1D4ED8",
+                "weight": 2.0,
+                "dashArray": "6 4",
+                "fillColor": "#3B82F6",
+                "fillOpacity": 0.65,
+            },
+        )
+        m.add(geo_layer)
+
+        hover_label = HTML()
+        hover_popup = ipyleaflet.Popup(
+            location=center,
+            child=hover_label,
+            close_button=False,
+            auto_close=False,
+            close_on_escape_key=False,
+        )
+        label_lat_offset = 0.0045  # move label just above the hovered neighbourhood
+
+        def update_hover_info(**kwargs):
+            props = kwargs.get("properties") or {}
+            name = props.get("name")
+            count = props.get("permit_count", 0)
+            geo_center = props.get("geo_point_2d") or {}
+            lat = geo_center.get("lat")
+            lon = geo_center.get("lon")
+
+            if not name:
+                if hover_popup in m.layers:
+                    m.remove(hover_popup)
+                return
+
+            hover_label.value = f"<b>{name}</b><br>Permits: {count:,}"
+            if lat is not None and lon is not None:
+                hover_popup.location = (lat + label_lat_offset, lon)
+            if hover_popup not in m.layers:
+                m.add(hover_popup)
+
+        if hasattr(geo_layer, "on_hover"):
+            geo_layer.on_hover(update_hover_info)
 
         return m
 
