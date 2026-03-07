@@ -1,4 +1,6 @@
 from datetime import date
+import copy
+import json
 from shiny import App, reactive, render, ui
 from shinywidgets import output_widget, render_widget, render_altair
 from faicons import icon_svg
@@ -6,7 +8,7 @@ import pandas as pd
 import ipyleaflet
 from ipywidgets import HTML
 import altair as alt
-import chatlas as clt 
+import chatlas as clt
 import os
 from querychat import QueryChat
 from dotenv import load_dotenv
@@ -21,11 +23,13 @@ APPLIED_DATE = 'PermitNumberCreatedDate'
 AREA = 'GeoLocalArea'
 PERMIT_TYPE = 'TypeOfWork'
 
-
 # Read in the data
 permits_df = pd.read_csv('data/raw/issued-building-permits.csv',
                          sep=';',
                          encoding='utf-8')
+
+with open('data/raw/local-area-boundary.geojson', encoding='utf-8') as f:
+    neighbourhood_geojson = json.load(f)
 
 # Standarsize dates and strip whitespace for values we want to filter on
 permits_df[ISSUE_DATE] = pd.to_datetime(permits_df[ISSUE_DATE])
@@ -33,11 +37,11 @@ permits_df[PERMIT_TYPE] = permits_df[PERMIT_TYPE].astype(str).str.strip()
 
 # create the Anthropic chat client using the ANTHROPIC_API_KEY in .env
 chat_client = clt.ChatAnthropic(
-    api_key = os.environ["ANTHROPIC_API_KEY"],
-    model = "claude-haiku-4-5-20251001"
+    api_key=os.environ["ANTHROPIC_API_KEY"],
+    model="claude-haiku-4-5-20251001"
 )
 
-query_chat = QueryChat(permits_df, "building_permits", client = chat_client)
+query_chat = QueryChat(permits_df, "building_permits", client=chat_client)
 
 # Find the minimum and maximum issue date dynamically from the data
 EARLIEST_ISSUE_DATE = permits_df[ISSUE_DATE].min().date()
@@ -164,6 +168,15 @@ app_ui = ui.page_fluid(
           border-color: var(--accent);
           box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.12);
           outline: none;
+        }
+
+        /* Neighbourhood dropdown: show more options at once */
+        #area + .selectize-control .selectize-dropdown-content {
+          max-height: 360px;
+        }
+        #area + .selectize-control .option {
+          padding-top: 8px;
+          padding-bottom: 8px;
         }
 
         .btn.btn-default, .btn.btn-primary {
@@ -301,125 +314,166 @@ app_ui = ui.page_fluid(
         "Vancouver Building Permits"
     ),
     ui.navset_tab(
-      # existing dashboard 
-      ui.nav_panel(
-          "Dashboard",
-          ui.layout_sidebar(
-              ui.sidebar(
-                  ui.tags.div(
-                      ui.tags.small(
-                          "Filter by date, work type, and neighbourhood",
-                          style="color: var(--text-muted); display: block; margin-bottom: 16px;",
-                      ),
-                  ),
-                  ui.input_date_range(
-                      id="date_range",
-                      label="Date Range",
-                      start=EARLIEST_ISSUE_DATE,
-                      end=LATEST_ISSUE_DATE,
-                      min=EARLIEST_ISSUE_DATE,
-                      max=LATEST_ISSUE_DATE
-                  ),
-                  ui.input_checkbox_group(
-                      id="checkbox_group",
-                      label="Type of Work",
-                      choices=TYPE_CHOICES,
-                      selected=TYPE_CHOICES,
-                  ),
-                  ui.input_select(
-                      id="area",
-                      label="Neighbourhood",
-                      choices=AREA_CHOICES,
-                      selected="All",
-                  ),
-                  ui.input_action_button("action_button", "Reset Filters"),
-                  open="desktop",
-                  width=280,
-              ),
-              ui.layout_column_wrap(
-                  ui.value_box(
-                      "Permits Issued",
-                      ui.output_text("permits_to_date"),
-                      showcase=icon_svg("file-lines", width="40px"),
-                      theme="primary",
-                  ),
-                  ui.value_box(
-                      "Avg Processing Time",
-                      ui.output_text("avg_days"),
-                      showcase=icon_svg("clock", width="40px"),
-                      class_="vb-purple",
-                  ),
-                  width=1/2,
-                  class_="kpi-wrap",
-              ),
-              ui.layout_columns(
-                  ui.card(
-                      ui.card_header("Permit Volume Over Time"),
-                      output_widget("permit_volume_trend"),
-                      full_screen=True,
-                  ),
-                  col_widths=[12],
-                  fill=False,
-              ),
-              ui.layout_columns(
-                  ui.card(
-                      ui.card_header("Neighbourhood Permit Map"),
-                      output_widget("neighbourhood_map"),
-                      full_screen=True,
-                  ),
-                  ui.card(
-                      ui.card_header("Top Neighbourhoods"),
-                      ui.input_slider("top_n", "Number of Neighbourhoods", min=5, max=20, value=5),
-                      output_widget("top_neighborhoods"),
-                      full_screen=True,
-                  ),
-                  col_widths={"sm": [12, 12], "lg": [7, 5]},
-              ),
-              ui.tags.div(
-                  "Vancouver Building Permits Dashboard | ",
-                  ui.tags.a("GitHub", href="https://github.com/UBC-MDS/DSCI-532_2026_25_building_permits", target="_blank"),
-                  " | Data: City of Vancouver Open Data Portal",
-                  class_="app-footer",
-              ),
-          ),
-      ),
+        ui.nav_panel(
+            "Dashboard",
+            ui.layout_sidebar(
+                ui.sidebar(
+            ui.tags.div(
+                ui.tags.small(
+                    "Filter by date, work type, and neighbourhood",
+                    style="color: var(--text-muted); display: block; margin-bottom: 16px;",
+                ),
+            ),
+            ui.input_date_range(
+                id="date_range",
+                label="Date Range",
+                start=EARLIEST_ISSUE_DATE,
+                end=LATEST_ISSUE_DATE,
+                min=EARLIEST_ISSUE_DATE,
+                max=LATEST_ISSUE_DATE
+            ),
+            ui.input_checkbox_group(
+                id="checkbox_group",
+                label="Type of Work",
+                choices=TYPE_CHOICES,
+                selected=TYPE_CHOICES,
+            ),
+            ui.input_selectize(
+                id="area",
+                label="Neighbourhood",
+                choices=AREA_CHOICES,
+                selected="All",
+                multiple=False,
+                options={"placeholder": "Type to search neighbourhood"},
+            ),
+            ui.tags.script(
+                """
+                document.addEventListener("shiny:connected", function () {
+                  function bindAreaFocusClear() {
+                    const el = document.getElementById("area");
+                    if (!el || !el.selectize) {
+                      setTimeout(bindAreaFocusClear, 200);
+                      return;
+                    }
+                    const sel = el.selectize;
+                    const clearSearchOnly = function () {
+                      // Clear only the typing text, keep current selected option.
+                      if (typeof sel.setTextboxValue === "function") {
+                        sel.setTextboxValue("");
+                      } else {
+                        sel.clearTextbox();
+                      }
+                    };
 
-      # AI tab
-      ui.nav_panel(
-          "AI",
-          ui.layout_columns(
-              
-              ui.card(
-                  ui.card_header("Ask the data"),
-                  query_chat.ui(), # add the querychat UI
-                  full_screen = False,
-                  open = "desktop",
-                  height = "80vh",
-              ),
-              ui.card(
-                  ui.card_header("Filtered dataframe (fron chat)"),
-                  ui.output_data_frame("ai_df_preview"),
-                  full_screen = False,
-                  height = "80vh",
-              ),
-              col_widths={"lg": [6, 6], "sm": [12, 12]},
-              fill = True
-          ),
-      ),
+                    sel.off("dropdown_open._clearSearch");
+                    sel.on("dropdown_open._clearSearch", function () {
+                      clearSearchOnly();
+                    });
+
+                    if (sel.$control_input) {
+                      sel.$control_input.off("focus._clearSearch");
+                      sel.$control_input.on("focus._clearSearch", function () {
+                        setTimeout(clearSearchOnly, 0);
+                      });
+                    }
+                  }
+                  bindAreaFocusClear();
+                });
+                """
+            ),
+                    ui.input_action_button("action_button", "Reset Filters"),
+                    open="desktop",
+                    width=280,
+                ),
+                ui.layout_column_wrap(
+            ui.value_box(
+                "Permits Issued",
+                ui.output_text("permits_to_date"),
+                showcase=icon_svg("file-lines", width="40px"),
+                theme="primary",
+            ),
+            ui.value_box(
+                "Avg Processing Time",
+                ui.output_text("avg_days"),
+                showcase=icon_svg("clock", width="40px"),
+                class_="vb-purple",
+            ),
+            width=1/2,
+            class_="kpi-wrap",
+        ),
+                ui.layout_columns(
+            ui.card(
+                ui.card_header("Permit Volume Over Time"),
+                output_widget("permit_volume_trend"),
+                full_screen=True,
+            ),
+            col_widths=[12],
+            fill=False,
+        ),
+                ui.layout_columns(
+            ui.card(
+                ui.card_header("Neighbourhood Permit Map"),
+                output_widget("neighbourhood_map"),
+                full_screen=True,
+            ),
+            ui.card(
+                ui.card_header("Top Neighbourhoods"),
+                ui.input_slider("top_n", "Number of Neighbourhoods", min=5, max=20, value=5),
+                output_widget("top_neighborhoods"),
+                full_screen=True,
+            ),
+            col_widths={"sm": [12, 12], "lg": [7, 5]},
+        ),
+                ui.tags.div(
+                    "Vancouver Building Permits Dashboard | ",
+                    ui.tags.a("GitHub", href="https://github.com/UBC-MDS/DSCI-532_2026_25_building_permits", target="_blank"),
+                    " | Data: City of Vancouver Open Data Portal",
+                    class_="app-footer",
+                ),
+            ),
+        ),
+        ui.nav_panel(
+            "AI",
+            ui.layout_columns(
+                ui.card(
+                    ui.card_header("Ask the data"),
+                    query_chat.ui(),
+                    full_screen=False,
+                    open="desktop",
+                    height="80vh",
+                ),
+                ui.card(
+                    ui.card_header("Filtered dataframe (from chat)"),
+                    ui.output_data_frame("ai_df_preview"),
+                    full_screen=False,
+                    height="80vh",
+                ),
+                col_widths={"lg": [6, 6], "sm": [12, 12]},
+                fill=True,
+            ),
+        ),
     ),
 )
 
+
 def server(input, output, session):
+    selected_area = reactive.Value("All")
     qc_vals = query_chat.server()
-  
+
+    @reactive.effect
+    def _sync_selected_area():
+        area = input.area()
+        if area in AREA_CHOICES:
+            selected_area.set(area)
+
     @reactive.calc
     def ai_df():
         return qc_vals.df()
-    
+
     @render.data_frame
     def ai_df_preview():
         return ai_df()
-    
+
     @reactive.effect
     @reactive.event(input.action_button)
     def _reset_filters():
@@ -432,7 +486,8 @@ def server(input, output, session):
             "checkbox_group",
             selected=TYPE_CHOICES,
         )
-        ui.update_select("area", selected="All")
+        selected_area.set("All")
+        ui.update_selectize("area", selected="All")
         ui.update_slider("top_n", value=5)
 
     @reactive.calc
@@ -456,11 +511,9 @@ def server(input, output, session):
 
         df = df[df[PERMIT_TYPE].isin(types)]
 
-        # Filter based on the area/neighbourhood selected (drop down so only
-        # one area/neighbourhood can be selected)
-        area = input.area()
+        # Filter based on selected neighbourhood from searchable dropdown.
+        area = selected_area.get()
         if area != "All":
-            # Filter df to only contain selected area
             df = df[df[AREA] == area]
 
         return df
@@ -548,27 +601,20 @@ def server(input, output, session):
 
         # if empty, return an empty df with expected columns
         if df.empty:
-            return pd.DataFrame(columns=[AREA, "permit_count", "lat", "lon"])
+            return pd.DataFrame(columns=[AREA, "permit_count"])
 
-        df = df.dropna(subset=['geo_point_2d'])
-
-        coords = df['geo_point_2d'].astype(str).str.split(',', expand=True)
-        df = df.copy()
-        df['lat'] = pd.to_numeric(coords[0].str.strip(), errors='coerce')
-        df['lon'] = pd.to_numeric(coords[1].str.strip(), errors='coerce')
-        df = df.dropna(subset=['lat', 'lon'])
-
-        grouped = df.groupby(AREA).agg(
-            permit_count=('lat', 'size'),
-            lat=('lat', 'mean'),
-            lon=('lon', 'mean')
-        ).reset_index()
+        grouped = (
+            df.groupby(AREA)
+            .size()
+            .reset_index(name="permit_count")
+        )
 
         return grouped
 
     @render_widget
     def neighbourhood_map():
         df = map_df()
+        active_area = selected_area.get()
 
         center = (49.26, -123.12)
         m = ipyleaflet.Map(
@@ -576,26 +622,151 @@ def server(input, output, session):
             zoom=12,
             layout={'height': '420px'},
             basemap=ipyleaflet.basemaps.CartoDB.Positron,
+            zoom_delta=0.5,
+            zoom_snap=0.5,
+            scroll_wheel_zoom=False,
+            touch_zoom=True,
+            double_click_zoom=False,
         )
 
-        if df.empty:
-            return m
+        counts = dict(zip(df[AREA], df["permit_count"])) if not df.empty else {}
 
-        max_count = df['permit_count'].max()
+        geojson_data = copy.deepcopy(neighbourhood_geojson)
+        for feature in geojson_data["features"]:
+            area_name = feature["properties"]["name"]
+            count = int(counts.get(area_name, 0))
+            feature["properties"]["permit_count"] = count
 
-        for _, row in df.iterrows():
-            radius = max(5, int((row['permit_count'] / max_count) * 40))
-            marker = ipyleaflet.CircleMarker(
-                location=(row['lat'], row['lon']),
-                radius=radius,
-                color='#6C5CE7',
-                fill_color='#0984E3',
-                fill_opacity=0.55,
-                weight=2,
+        def geometry_bounds(geometry):
+            min_lat, min_lon = 90.0, 180.0
+            max_lat, max_lon = -90.0, -180.0
+
+            def walk(coords):
+                nonlocal min_lat, min_lon, max_lat, max_lon
+                if not coords:
+                    return
+                if isinstance(coords[0], (int, float)) and len(coords) >= 2:
+                    lon, lat = float(coords[0]), float(coords[1])
+                    min_lat = min(min_lat, lat)
+                    max_lat = max(max_lat, lat)
+                    min_lon = min(min_lon, lon)
+                    max_lon = max(max_lon, lon)
+                    return
+                for item in coords:
+                    walk(item)
+
+            walk(geometry.get("coordinates", []))
+            return min_lat, min_lon, max_lat, max_lon
+
+        geo_layer = ipyleaflet.GeoJSON(
+            data=geojson_data,
+            style={
+                "color": "#4B5563",
+                "weight": 1.2,
+                "dashArray": "6 4",
+                "fillColor": "#E5E7EB",
+                "fillOpacity": 0.35,
+            },
+            hover_style={
+                "color": "#1D4ED8",
+                "weight": 2.0,
+                "dashArray": "6 4",
+                "fillColor": "#3B82F6",
+                "fillOpacity": 0.65,
+            },
+        )
+        m.add(geo_layer)
+
+        selected_layer = None
+        # Strong, persistent border highlight for selected neighbourhood.
+        if active_area != "All":
+            selected_feature = next(
+                (
+                    feature for feature in geojson_data["features"]
+                    if feature["properties"]["name"] == active_area
+                ),
+                None,
             )
-            popup_content = HTML(value=f"<b>{row[AREA]}</b><br>Permits:{row['permit_count']:,}")
-            marker.popup = popup_content
-            m.add(marker)
+            if selected_feature is not None:
+                selected_layer = ipyleaflet.GeoJSON(
+                    data={"type": "FeatureCollection", "features": [selected_feature]},
+                    style={
+                        "color": "#1D4ED8",
+                        "weight": 4,
+                        "dashArray": "2 0",
+                        "fillColor": "#DBEAFE",
+                        "fillOpacity": 0.0,
+                    },
+                    hover_style={
+                        "color": "#1D4ED8",
+                        "weight": 4,
+                        "dashArray": "2 0",
+                        "fillColor": "#3B82F6",
+                        "fillOpacity": 0.65,
+                    },
+                )
+                m.add(selected_layer)
+
+        # Neighbourhood features currently visible after filtering.
+        selected_areas = set(df[AREA].tolist()) if not df.empty else set()
+        relevant_features = [
+            f for f in geojson_data["features"]
+            if not selected_areas or f["properties"]["name"] in selected_areas
+        ]
+
+        hover_info = HTML(value="")
+        hover_control = ipyleaflet.WidgetControl(widget=hover_info, position="topright")
+
+        def hide_hover_info():
+            hover_info.value = ""
+            if hover_control in m.controls:
+                m.remove(hover_control)
+
+        def update_hover_info(**kwargs):
+            props = kwargs.get("properties") or {}
+            name = props.get("name")
+            count = props.get("permit_count", 0)
+
+            if not name:
+                hide_hover_info()
+                return
+
+            hover_info.value = f"<b>{name}</b><br>Permits: {count:,}"
+            if hover_control not in m.controls:
+                m.add(hover_control)
+
+        def clear_on_mouseout(**kwargs):
+            if kwargs.get("type") in ("mouseout", "mouseleave"):
+                hide_hover_info()
+
+        if hasattr(geo_layer, "on_hover"):
+            geo_layer.on_hover(update_hover_info)
+        if selected_layer is not None and hasattr(selected_layer, "on_hover"):
+            selected_layer.on_hover(update_hover_info)
+        if hasattr(m, "on_interaction"):
+            m.on_interaction(clear_on_mouseout)
+
+        # Auto-zoom so all filtered/selected neighbourhoods are visible.
+        if relevant_features:
+            south, west = 90.0, 180.0
+            north, east = -90.0, -180.0
+            for feature in relevant_features:
+                min_lat, min_lon, max_lat, max_lon = geometry_bounds(feature["geometry"])
+                south = min(south, min_lat)
+                west = min(west, min_lon)
+                north = max(north, max_lat)
+                east = max(east, max_lon)
+            if active_area == "All":
+                lat_pad = max(0.002, (north - south) * 0.05)
+                lon_pad = max(0.002, (east - west) * 0.05)
+            else:
+                # Keep a wider local context when a single neighbourhood is selected.
+                lat_pad = max(0.02, (north - south) * 0.50)
+                lon_pad = max(0.02, (east - west) * 0.50)
+            m.fit_bounds([
+                (south - lat_pad, west - lon_pad),
+                (north + lat_pad, east + lon_pad),
+            ])
 
         return m
 
