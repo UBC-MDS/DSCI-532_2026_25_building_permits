@@ -388,22 +388,33 @@ app_ui = ui.page_fluid(
       ui.nav_panel(
           "AI",
           ui.layout_columns(
-              
               ui.card(
                   ui.card_header("Ask the data"),
-                  query_chat.ui(), # add the querychat UI
-                  full_screen = False,
-                  open = "desktop",
-                  height = "80vh",
+                  query_chat.ui(),
+                  full_screen=False,
+                  height="70vh",
               ),
               ui.card(
-                  ui.card_header("Filtered dataframe (fron chat)"),
+                  ui.card_header("Filtered dataframe (from chat)"),
                   ui.output_data_frame("ai_df_preview"),
-                  full_screen = False,
-                  height = "80vh",
+                  full_screen=False,
+                  height="70vh",
               ),
               col_widths={"lg": [6, 6], "sm": [12, 12]},
-              fill = True
+              fill=True,
+          ),
+          ui.layout_columns(
+              ui.card(
+                  ui.card_header("Permit Volume Over Time"),
+                  output_widget("ai_permit_volume_trend"),
+                  full_screen=True,
+              ),
+              ui.card(
+                  ui.card_header("Top Neighbourhoods"),
+                  output_widget("ai_top_neighborhoods"),
+                  full_screen=True,
+              ),
+              col_widths={"lg": [6, 6], "sm": [12, 12]},
           ),
       ),
     ),
@@ -419,7 +430,67 @@ def server(input, output, session):
     @render.data_frame
     def ai_df_preview():
         return ai_df()
-    
+
+    @render_widget
+    def ai_permit_volume_trend():
+        df = ai_df().copy()
+
+        if ISSUE_DATE not in df.columns or df.empty:
+            return alt.Chart(pd.DataFrame({"x": [], "y": []})).mark_point()
+
+        df[ISSUE_DATE] = pd.to_datetime(df[ISSUE_DATE])
+        df['month'] = df[ISSUE_DATE].dt.to_period('M').dt.to_timestamp()
+
+        monthly = (
+            df.groupby('month')
+            .size()
+            .reset_index(name='count')
+        )
+
+        chart = (
+            alt.Chart(monthly)
+            .mark_line(color="#6C5CE7", strokeWidth=2.5)
+            .encode(
+                x=alt.X('month:T', title='Year',
+                        axis=alt.Axis(titleFontWeight='bold')),
+                y=alt.Y('count:Q', title='Count',
+                        axis=alt.Axis(titleFontWeight='bold')),
+            )
+            .properties(background="transparent")
+            .configure_view(strokeWidth=0, fill="transparent")
+        )
+        return chart
+
+    @render_widget
+    def ai_top_neighborhoods():
+        df = ai_df().copy()
+
+        if AREA not in df.columns or df.empty:
+            return alt.Chart(pd.DataFrame({"x": [], "y": []})).mark_point()
+
+        top = (
+            df.groupby(AREA)
+            .size()
+            .reset_index(name='count')
+            .nlargest(10, 'count')
+            .sort_values('count', ascending=False)
+        )
+
+        chart = (
+            alt.Chart(top)
+            .mark_bar()
+            .encode(
+                x=alt.X('count:Q', title='Permit Count'),
+                y=alt.Y(f'{AREA}:N', sort='-x', title='Neighbourhood',
+                        axis=alt.Axis(titleFontWeight='bold')),
+                tooltip=[AREA, 'count'],
+            )
+            .properties(background="transparent")
+            .configure_view(strokeWidth=0, fill="transparent")
+            .configure_mark(color="#6C5CE7")
+        )
+        return chart
+
     @reactive.effect
     @reactive.event(input.action_button)
     def _reset_filters():
