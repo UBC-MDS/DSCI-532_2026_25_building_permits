@@ -312,11 +312,48 @@ app_ui = ui.page_fluid(
                 choices=TYPE_CHOICES,
                 selected=TYPE_CHOICES,
             ),
-            ui.input_select(
+            ui.input_selectize(
                 id="area",
                 label="Neighbourhood",
                 choices=AREA_CHOICES,
                 selected="All",
+                multiple=False,
+                options={"placeholder": "Type to search neighbourhood"},
+            ),
+            ui.tags.script(
+                """
+                document.addEventListener("shiny:connected", function () {
+                  function bindAreaFocusClear() {
+                    const el = document.getElementById("area");
+                    if (!el || !el.selectize) {
+                      setTimeout(bindAreaFocusClear, 200);
+                      return;
+                    }
+                    const sel = el.selectize;
+                    const clearSearchOnly = function () {
+                      // Clear only the typing text, keep current selected option.
+                      if (typeof sel.setTextboxValue === "function") {
+                        sel.setTextboxValue("");
+                      } else {
+                        sel.clearTextbox();
+                      }
+                    };
+
+                    sel.off("dropdown_open._clearSearch");
+                    sel.on("dropdown_open._clearSearch", function () {
+                      clearSearchOnly();
+                    });
+
+                    if (sel.$control_input) {
+                      sel.$control_input.off("focus._clearSearch");
+                      sel.$control_input.on("focus._clearSearch", function () {
+                        setTimeout(clearSearchOnly, 0);
+                      });
+                    }
+                  }
+                  bindAreaFocusClear();
+                });
+                """
             ),
             ui.input_action_button("action_button", "Reset Filters"),
             open="desktop",
@@ -372,6 +409,14 @@ app_ui = ui.page_fluid(
 
 
 def server(input, output, session):
+    selected_area = reactive.Value("All")
+
+    @reactive.effect
+    def _sync_selected_area():
+        area = input.area()
+        if area in AREA_CHOICES:
+            selected_area.set(area)
+
     @reactive.effect
     @reactive.event(input.action_button)
     def _reset_filters():
@@ -384,7 +429,8 @@ def server(input, output, session):
             "checkbox_group",
             selected=TYPE_CHOICES,
         )
-        ui.update_select("area", selected="All")
+        selected_area.set("All")
+        ui.update_selectize("area", selected="All")
         ui.update_slider("top_n", value=5)
 
     @reactive.calc
@@ -408,11 +454,9 @@ def server(input, output, session):
 
         df = df[df[PERMIT_TYPE].isin(types)]
 
-        # Filter based on the area/neighbourhood selected (drop down so only
-        # one area/neighbourhood can be selected)
-        area = input.area()
+        # Filter based on selected neighbourhood from searchable dropdown.
+        area = selected_area.get()
         if area != "All":
-            # Filter df to only contain selected area
             df = df[df[AREA] == area]
 
         return df
@@ -513,6 +557,7 @@ def server(input, output, session):
     @render_widget
     def neighbourhood_map():
         df = map_df()
+        active_area = selected_area.get()
 
         center = (49.26, -123.12)
         m = ipyleaflet.Map(
@@ -575,6 +620,36 @@ def server(input, output, session):
         )
         m.add(geo_layer)
 
+        selected_layer = None
+        # Strong, persistent border highlight for selected neighbourhood.
+        if active_area != "All":
+            selected_feature = next(
+                (
+                    feature for feature in geojson_data["features"]
+                    if feature["properties"]["name"] == active_area
+                ),
+                None,
+            )
+            if selected_feature is not None:
+                selected_layer = ipyleaflet.GeoJSON(
+                    data={"type": "FeatureCollection", "features": [selected_feature]},
+                    style={
+                        "color": "#1D4ED8",
+                        "weight": 4,
+                        "dashArray": "2 0",
+                        "fillColor": "#DBEAFE",
+                        "fillOpacity": 0.0,
+                    },
+                    hover_style={
+                        "color": "#1D4ED8",
+                        "weight": 4,
+                        "dashArray": "2 0",
+                        "fillColor": "#3B82F6",
+                        "fillOpacity": 0.65,
+                    },
+                )
+                m.add(selected_layer)
+
         # Neighbourhood features currently visible after filtering.
         selected_areas = set(df[AREA].tolist()) if not df.empty else set()
         relevant_features = [
@@ -609,6 +684,8 @@ def server(input, output, session):
 
         if hasattr(geo_layer, "on_hover"):
             geo_layer.on_hover(update_hover_info)
+        if selected_layer is not None and hasattr(selected_layer, "on_hover"):
+            selected_layer.on_hover(update_hover_info)
         if hasattr(m, "on_interaction"):
             m.on_interaction(clear_on_mouseout)
 
@@ -622,8 +699,8 @@ def server(input, output, session):
                 west = min(west, min_lon)
                 north = max(north, max_lat)
                 east = max(east, max_lon)
-            lat_pad = max(0.003, (north - south) * 0.08)
-            lon_pad = max(0.003, (east - west) * 0.08)
+            lat_pad = max(0.002, (north - south) * 0.05)
+            lon_pad = max(0.002, (east - west) * 0.05)
             m.fit_bounds([
                 (south - lat_pad, west - lon_pad),
                 (north + lat_pad, east + lon_pad),
