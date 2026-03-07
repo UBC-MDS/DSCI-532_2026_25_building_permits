@@ -156,6 +156,15 @@ app_ui = ui.page_fluid(
           outline: none;
         }
 
+        /* Neighbourhood dropdown: show more options at once */
+        #area + .selectize-control .selectize-dropdown-content {
+          max-height: 360px;
+        }
+        #area + .selectize-control .option {
+          padding-top: 8px;
+          padding-bottom: 8px;
+        }
+
         .btn.btn-default, .btn.btn-primary {
           width: 100%;
           background: linear-gradient(135deg, #6C5CE7, #5A4BD1);
@@ -567,7 +576,7 @@ def server(input, output, session):
             basemap=ipyleaflet.basemaps.CartoDB.Positron,
             zoom_delta=0.5,
             zoom_snap=0.5,
-            scroll_wheel_zoom=True,
+            scroll_wheel_zoom=False,
             touch_zoom=True,
             double_click_zoom=False,
         )
@@ -699,8 +708,13 @@ def server(input, output, session):
                 west = min(west, min_lon)
                 north = max(north, max_lat)
                 east = max(east, max_lon)
-            lat_pad = max(0.002, (north - south) * 0.05)
-            lon_pad = max(0.002, (east - west) * 0.05)
+            if active_area == "All":
+                lat_pad = max(0.002, (north - south) * 0.05)
+                lon_pad = max(0.002, (east - west) * 0.05)
+            else:
+                # Keep a wider local context when a single neighbourhood is selected.
+                lat_pad = max(0.02, (north - south) * 0.50)
+                lon_pad = max(0.02, (east - west) * 0.50)
             m.fit_bounds([
                 (south - lat_pad, west - lon_pad),
                 (north + lat_pad, east + lon_pad),
