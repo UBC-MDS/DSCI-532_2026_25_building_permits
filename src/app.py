@@ -520,6 +520,11 @@ def server(input, output, session):
             zoom=12,
             layout={'height': '420px'},
             basemap=ipyleaflet.basemaps.CartoDB.Positron,
+            zoom_delta=0.5,
+            zoom_snap=0.5,
+            scroll_wheel_zoom=True,
+            touch_zoom=True,
+            double_click_zoom=False,
         )
 
         counts = dict(zip(df[AREA], df["permit_count"])) if not df.empty else {}
@@ -529,6 +534,27 @@ def server(input, output, session):
             area_name = feature["properties"]["name"]
             count = int(counts.get(area_name, 0))
             feature["properties"]["permit_count"] = count
+
+        def geometry_bounds(geometry):
+            min_lat, min_lon = 90.0, 180.0
+            max_lat, max_lon = -90.0, -180.0
+
+            def walk(coords):
+                nonlocal min_lat, min_lon, max_lat, max_lon
+                if not coords:
+                    return
+                if isinstance(coords[0], (int, float)) and len(coords) >= 2:
+                    lon, lat = float(coords[0]), float(coords[1])
+                    min_lat = min(min_lat, lat)
+                    max_lat = max(max_lat, lat)
+                    min_lon = min(min_lon, lon)
+                    max_lon = max(max_lon, lon)
+                    return
+                for item in coords:
+                    walk(item)
+
+            walk(geometry.get("coordinates", []))
+            return min_lat, min_lon, max_lat, max_lon
 
         geo_layer = ipyleaflet.GeoJSON(
             data=geojson_data,
@@ -549,37 +575,59 @@ def server(input, output, session):
         )
         m.add(geo_layer)
 
-        hover_label = HTML()
-        hover_popup = ipyleaflet.Popup(
-            location=center,
-            child=hover_label,
-            close_button=False,
-            auto_close=False,
-            close_on_escape_key=False,
-        )
-        label_lat_offset = 0.0045  # move label just above the hovered neighbourhood
+        # Neighbourhood features currently visible after filtering.
+        selected_areas = set(df[AREA].tolist()) if not df.empty else set()
+        relevant_features = [
+            f for f in geojson_data["features"]
+            if not selected_areas or f["properties"]["name"] in selected_areas
+        ]
+
+        hover_info = HTML(value="")
+        hover_control = ipyleaflet.WidgetControl(widget=hover_info, position="topright")
+
+        def hide_hover_info():
+            hover_info.value = ""
+            if hover_control in m.controls:
+                m.remove(hover_control)
 
         def update_hover_info(**kwargs):
             props = kwargs.get("properties") or {}
             name = props.get("name")
             count = props.get("permit_count", 0)
-            geo_center = props.get("geo_point_2d") or {}
-            lat = geo_center.get("lat")
-            lon = geo_center.get("lon")
 
             if not name:
-                if hover_popup in m.layers:
-                    m.remove(hover_popup)
+                hide_hover_info()
                 return
 
-            hover_label.value = f"<b>{name}</b><br>Permits: {count:,}"
-            if lat is not None and lon is not None:
-                hover_popup.location = (lat + label_lat_offset, lon)
-            if hover_popup not in m.layers:
-                m.add(hover_popup)
+            hover_info.value = f"<b>{name}</b><br>Permits: {count:,}"
+            if hover_control not in m.controls:
+                m.add(hover_control)
+
+        def clear_on_mouseout(**kwargs):
+            if kwargs.get("type") in ("mouseout", "mouseleave"):
+                hide_hover_info()
 
         if hasattr(geo_layer, "on_hover"):
             geo_layer.on_hover(update_hover_info)
+        if hasattr(m, "on_interaction"):
+            m.on_interaction(clear_on_mouseout)
+
+        # Auto-zoom so all filtered/selected neighbourhoods are visible.
+        if relevant_features:
+            south, west = 90.0, 180.0
+            north, east = -90.0, -180.0
+            for feature in relevant_features:
+                min_lat, min_lon, max_lat, max_lon = geometry_bounds(feature["geometry"])
+                south = min(south, min_lat)
+                west = min(west, min_lon)
+                north = max(north, max_lat)
+                east = max(east, max_lon)
+            lat_pad = max(0.003, (north - south) * 0.08)
+            lon_pad = max(0.003, (east - west) * 0.08)
+            m.fit_bounds([
+                (south - lat_pad, west - lon_pad),
+                (north + lat_pad, east + lon_pad),
+            ])
 
         return m
 
