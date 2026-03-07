@@ -8,6 +8,12 @@ import pandas as pd
 import ipyleaflet
 from ipywidgets import HTML
 import altair as alt
+import chatlas as clt
+import os
+from querychat import QueryChat
+from dotenv import load_dotenv
+
+load_dotenv()
 
 alt.themes.enable("latimes")
 
@@ -28,6 +34,14 @@ with open('data/raw/local-area-boundary.geojson', encoding='utf-8') as f:
 # Standarsize dates and strip whitespace for values we want to filter on
 permits_df[ISSUE_DATE] = pd.to_datetime(permits_df[ISSUE_DATE])
 permits_df[PERMIT_TYPE] = permits_df[PERMIT_TYPE].astype(str).str.strip()
+
+# create the Anthropic chat client using the ANTHROPIC_API_KEY in .env
+chat_client = clt.ChatAnthropic(
+    api_key=os.environ["ANTHROPIC_API_KEY"],
+    model="claude-haiku-4-5-20251001"
+)
+
+query_chat = QueryChat(permits_df, "building_permits", client=chat_client)
 
 # Find the minimum and maximum issue date dynamically from the data
 EARLIEST_ISSUE_DATE = permits_df[ISSUE_DATE].min().date()
@@ -299,8 +313,11 @@ app_ui = ui.page_fluid(
     ui.panel_title(
         "Vancouver Building Permits"
     ),
-    ui.layout_sidebar(
-        ui.sidebar(
+    ui.navset_tab(
+        ui.nav_panel(
+            "Dashboard",
+            ui.layout_sidebar(
+                ui.sidebar(
             ui.tags.div(
                 ui.tags.small(
                     "Filter by date, work type, and neighbourhood",
@@ -364,11 +381,11 @@ app_ui = ui.page_fluid(
                 });
                 """
             ),
-            ui.input_action_button("action_button", "Reset Filters"),
-            open="desktop",
-            width=280,
-        ),
-        ui.layout_column_wrap(
+                    ui.input_action_button("action_button", "Reset Filters"),
+                    open="desktop",
+                    width=280,
+                ),
+                ui.layout_column_wrap(
             ui.value_box(
                 "Permits Issued",
                 ui.output_text("permits_to_date"),
@@ -384,7 +401,7 @@ app_ui = ui.page_fluid(
             width=1/2,
             class_="kpi-wrap",
         ),
-        ui.layout_columns(
+                ui.layout_columns(
             ui.card(
                 ui.card_header("Permit Volume Over Time"),
                 output_widget("permit_volume_trend"),
@@ -393,7 +410,7 @@ app_ui = ui.page_fluid(
             col_widths=[12],
             fill=False,
         ),
-        ui.layout_columns(
+                ui.layout_columns(
             ui.card(
                 ui.card_header("Neighbourhood Permit Map"),
                 output_widget("neighbourhood_map"),
@@ -407,11 +424,33 @@ app_ui = ui.page_fluid(
             ),
             col_widths={"sm": [12, 12], "lg": [7, 5]},
         ),
-        ui.tags.div(
-            "Vancouver Building Permits Dashboard | ",
-            ui.tags.a("GitHub", href="https://github.com/UBC-MDS/DSCI-532_2026_25_building_permits", target="_blank"),
-            " | Data: City of Vancouver Open Data Portal",
-            class_="app-footer",
+                ui.tags.div(
+                    "Vancouver Building Permits Dashboard | ",
+                    ui.tags.a("GitHub", href="https://github.com/UBC-MDS/DSCI-532_2026_25_building_permits", target="_blank"),
+                    " | Data: City of Vancouver Open Data Portal",
+                    class_="app-footer",
+                ),
+            ),
+        ),
+        ui.nav_panel(
+            "AI",
+            ui.layout_columns(
+                ui.card(
+                    ui.card_header("Ask the data"),
+                    query_chat.ui(),
+                    full_screen=False,
+                    open="desktop",
+                    height="80vh",
+                ),
+                ui.card(
+                    ui.card_header("Filtered dataframe (from chat)"),
+                    ui.output_data_frame("ai_df_preview"),
+                    full_screen=False,
+                    height="80vh",
+                ),
+                col_widths={"lg": [6, 6], "sm": [12, 12]},
+                fill=True,
+            ),
         ),
     ),
 )
@@ -419,12 +458,21 @@ app_ui = ui.page_fluid(
 
 def server(input, output, session):
     selected_area = reactive.Value("All")
+    qc_vals = query_chat.server()
 
     @reactive.effect
     def _sync_selected_area():
         area = input.area()
         if area in AREA_CHOICES:
             selected_area.set(area)
+
+    @reactive.calc
+    def ai_df():
+        return qc_vals.df()
+
+    @render.data_frame
+    def ai_df_preview():
+        return ai_df()
 
     @reactive.effect
     @reactive.event(input.action_button)
