@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.3.0] - 2026-02-12
+
+### Added
+
+- QueryChat AI tab with natural language data filtering powered by Anthropic Claude (PR #57)
+- Permit volume over time and top neighbourhoods charts in the AI tab, driven by QueryChat-filtered data (PR #61)
+- Download button to export AI-filtered data as CSV (PR #62)
+- GeoJSON neighbourhood boundaries on the map with hover tooltips showing area name and permit count (PR #60)
+- Searchable neighbourhood dropdown using selectize with type-to-search (PR #60)
+- Auto-zoom on the map to fit filtered or selected neighbourhoods (PR #60)
+
+### Changed
+
+- Neighbourhood map now renders GeoJSON polygon boundaries instead of circle markers, giving a clearer view of geographic areas
+- Neighbourhood dropdown upgraded from a plain select to a selectize input with search and auto-clear behaviour
+- Map highlights the selected neighbourhood with a distinct border style and zooms to fit its bounds
+- AI tab layout reorganised into a top row (chat and filtered table) and a bottom row (two reactive charts)
+
+### Reflection
+
+Milestone 3 focused on adding an AI-powered exploration layer to the dashboard. The main addition is the QueryChat tab, which lets users filter the permit dataset using natural language queries instead of manual sidebar controls. Two charts in the AI tab (permit volume over time and top neighbourhoods) update reactively based on the chat-filtered dataframe, and a download button lets users export the result as a CSV. On the Dashboard tab, the neighbourhood map was upgraded from simple circle markers to GeoJSON polygon boundaries with hover tooltips and auto-zoom, which makes the geographic context much clearer. The neighbourhood dropdown was also replaced with a searchable selectize input.
+
+The main deviation from the original plan was the scope of the AI integration. The initial plan did not include a chatbot-driven filtering interface; this was added in response to the Milestone 3 requirement for a QueryChat component. The GeoJSON map upgrade was also not in the original sketch but was a natural improvement once the boundary data became available.
+
+Known limitations include the dependency on an external API key (Anthropic) for the AI tab, which means the tab will not function without a valid key in the `.env` file. The AI-generated SQL filters depend on the LLM interpreting the user's query correctly, so edge cases in phrasing may produce unexpected results. The download button exports whatever the current AI-filtered state is, so users need to verify the filter before exporting.
+
+The dashboard continues to follow the visualization best practices from DSCI 531. Chart types match the comparison tasks (line chart for temporal trends, bar chart for categorical ranking, choropleth-style map for geographic distribution), labels and titles are clear, and the layout groups related views together. We do not believe there are intentional deviations from those practices in this version.
+
 ## [0.2.0] - 2026-02-28
 
 ### Added
