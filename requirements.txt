@@ -7,3 +7,8 @@ shinywidgets==0.7.1
 ipyleaflet==0.20.0
 altair==6.0.0
 faicons==0.2.2
+querychat==0.5.1
+chatlas==0.13.2
+shinychat>=0.2.8
+python-dotenv
+anthropic
