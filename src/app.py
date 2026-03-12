@@ -12,6 +12,8 @@ import chatlas as clt
 import os
 from querychat import QueryChat
 from dotenv import load_dotenv
+import ibis 
+from ibis import _ # _ is a shortcut for referencing columns in an ibis table expression without typing table name. ex) permits.filter(_.project_value < 10000) compared to permits.filter(permits.project_value < 10000)
 
 load_dotenv()
 
@@ -23,10 +25,9 @@ APPLIED_DATE = 'PermitNumberCreatedDate'
 AREA = 'GeoLocalArea'
 PERMIT_TYPE = 'TypeOfWork'
 
-# Read in the data
-permits_df = pd.read_csv('data/raw/issued-building-permits.csv',
-                         sep=';',
-                         encoding='utf-8')
+# connect to the data from the parquet file using ibis/DuckDB
+conn = ibis.duckdb.connect()
+permits = conn.read_parquet("data/processed/issued-building-permits.parquet")
 
 with open('data/raw/local-area-boundary.geojson', encoding='utf-8') as f:
     neighbourhood_geojson = json.load(f)
@@ -473,6 +474,7 @@ app_ui = ui.page_fluid(
 
 
 def server(input, output, session):
+    session.on_ended(conn.disconnect)
     selected_area = reactive.Value("All")
     qc_vals = query_chat.server()
 
