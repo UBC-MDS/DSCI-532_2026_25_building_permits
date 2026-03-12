@@ -12,3 +12,4 @@ chatlas==0.13.2
 shinychat>=0.2.8
 python-dotenv
 anthropic
+pyarrow==23.0.1
