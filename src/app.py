@@ -12,6 +12,8 @@ import chatlas as clt
 import os
 from querychat import QueryChat
 from dotenv import load_dotenv
+import ibis 
+from ibis import _ # _ is a shortcut for referencing columns in an ibis table expression without typing table name. ex) permits.filter(_.project_value < 10000) compared to permits.filter(permits.project_value < 10000)
 
 load_dotenv()
 
@@ -23,10 +25,7 @@ APPLIED_DATE = 'PermitNumberCreatedDate'
 AREA = 'GeoLocalArea'
 PERMIT_TYPE = 'TypeOfWork'
 
-# Read in the data
-permits_df = pd.read_csv('data/raw/issued-building-permits.csv',
-                         sep=';',
-                         encoding='utf-8')
+permits_df = pd.read_parquet("data/processed/issued-building-permits.parquet")
 
 with open('data/raw/local-area-boundary.geojson', encoding='utf-8') as f:
     neighbourhood_geojson = json.load(f)
@@ -471,8 +470,11 @@ app_ui = ui.page_fluid(
     ),
 )
 
-
 def server(input, output, session):
+    # connect to the data from the parquet file using ibis/DuckDB
+    conn = ibis.duckdb.connect()
+    permits = conn.read_parquet("data/processed/issued-building-permits.parquet")
+    session.on_ended(conn.disconnect)
     selected_area = reactive.Value("All")
     qc_vals = query_chat.server()
 
@@ -569,39 +571,48 @@ def server(input, output, session):
         selected_area.set("All")
         ui.update_selectize("area", selected="All")
         ui.update_slider("top_n", value=5)
-
+    
     @reactive.calc
-    def filtered_df():
-        df = permits_df.copy()
-
+    def filtered_expr():
         # Filter based on the inputted date
         start, end = input.date_range()
         start = pd.to_datetime(start)
         end = pd.to_datetime(end)
 
+        expr = permits
+
         # Filter for rows between the start and end date (mutually inclusive)
-        df = df[(df[ISSUE_DATE] >= start) & (df[ISSUE_DATE] <= end)]
+        expr = expr.filter(
+            _[ISSUE_DATE].between(start, end)
+        )
 
         # Filter the df so it only contains the permit types checked off
         types = list(input.checkbox_group())
 
         # If the user clears all work types manually, show no matching rows.
         if len(types) == 0:
-            return df.iloc[0:0]
+            expr = expr.filter(
+                _[PERMIT_TYPE].isin([])
+            )
+            return expr
 
-        df = df[df[PERMIT_TYPE].isin(types)]
+        expr = expr.filter(_[PERMIT_TYPE].isin(types))
 
         # Filter based on selected neighbourhood from searchable dropdown.
         area = selected_area.get()
         if area != "All":
-            df = df[df[AREA] == area]
+            expr = expr.filter(_[AREA] == area)
 
-        return df
+        return expr
+    
+    @reactive.calc
+    def filtered_df():
+        return filtered_expr().execute()
 
     @render.text
     def permits_to_date():
         # Count of permits based on selected filters/filtered_df
-        return f"{len(filtered_df()):,}"
+        return f"{filtered_expr().count().execute():,}"
 
     @render.text
     def avg_days():
