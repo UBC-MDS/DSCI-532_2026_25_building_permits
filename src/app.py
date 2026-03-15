@@ -547,15 +547,24 @@ def server(input, output, session):
             .reset_index(name='count')
         )
 
+        base = alt.Chart(monthly).encode(
+            x=alt.X('month:T', title='Year',
+                    axis=alt.Axis(titleFontWeight='bold')),
+            y=alt.Y('count:Q', title='Count',
+                    axis=alt.Axis(titleFontWeight='bold')),
+        )
+
+        line = base.mark_line(color="#6C5CE7", strokeWidth=2.5)
+
+        points = base.mark_point(color="#6C5CE7", size=30, opacity=0).encode(
+            tooltip=[
+                alt.Tooltip('month:T', title='Month', format='%b %Y'),
+                alt.Tooltip('count:Q', title='Permits'),
+            ]
+        )
+
         chart = (
-            alt.Chart(monthly)
-            .mark_line(color="#6C5CE7", strokeWidth=2.5)
-            .encode(
-                x=alt.X('month:T', title='Year',
-                        axis=alt.Axis(titleFontWeight='bold')),
-                y=alt.Y('count:Q', title='Count',
-                        axis=alt.Axis(titleFontWeight='bold')),
-            )
+            (line + points)
             .properties(background="transparent")
             .configure_view(strokeWidth=0, fill="transparent")
         )
@@ -677,18 +686,26 @@ def server(input, output, session):
 
         start, end = input.date_range()
 
+        base = alt.Chart(monthly).encode(
+            x=alt.X('month:T', scale=alt.Scale(domain=[str(start), str(end)]), title='Year',
+                    axis=alt.Axis(titleFontWeight='bold')),
+            y=alt.Y('count:Q', title='Count',
+                    axis=alt.Axis(titleFontWeight='bold')),
+        )
+
+        line = base.mark_line(color="#6C5CE7", strokeWidth=2.5)
+
+        points = base.mark_point(color="#6C5CE7", size=30, opacity=0).encode(
+            tooltip=[
+                alt.Tooltip('month:T', title='Month', format='%b %Y'),
+                alt.Tooltip('count:Q', title='Permits'),
+            ]
+        )
+
         chart = (
-            alt.Chart(monthly)
-            .mark_line()
-            .encode(
-                x=alt.X('month:T', scale=alt.Scale(domain=[str(start), str(end)]), title='Year',
-                        axis=alt.Axis(titleFontWeight='bold')),
-                y=alt.Y('count:Q', title='Count',
-                        axis=alt.Axis(titleFontWeight='bold')),
-            )
+            (line + points)
             .properties(background="transparent")
             .configure_view(strokeWidth=0, fill="transparent")
-            .mark_line(color="#6C5CE7", strokeWidth=2.5)
         )
 
         return chart
