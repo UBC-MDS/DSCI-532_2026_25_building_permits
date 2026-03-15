@@ -196,32 +196,63 @@ app_ui = ui.page_fluid(
           box-shadow: 0 4px 14px rgba(108, 92, 231, 0.35);
         }
 
-        /* Value boxes */
+        /* Value boxes – compact */
         .bslib-value-box {
           border-radius: var(--radius);
           box-shadow: var(--shadow-sm);
-          min-height: 110px;
+          min-height: auto !important;
           transition: box-shadow 0.2s, transform 0.2s;
           border: none;
+          overflow: hidden;
+        }
+        .bslib-value-box .card-body {
+          padding: 6px 12px !important;
+        }
+        .bslib-value-box .value-box-grid {
+          --bslib-grid-height: auto !important;
+          --bslib-grid-height-mobile: auto !important;
+          min-height: 0 !important;
+          display: block !important;
+          position: relative;
         }
         .bslib-value-box:hover {
           box-shadow: var(--shadow-md);
           transform: translateY(-2px);
         }
         .bslib-value-box .value-box-title {
-          font-size: 0.76rem;
+          font-size: 0.62rem;
           font-weight: 600;
           text-transform: uppercase;
           letter-spacing: 0.5px;
           opacity: 0.85;
+          margin-bottom: 0;
         }
         .bslib-value-box .value-box-value {
-          font-size: 1.85rem;
+          font-size: 1.15rem;
           font-weight: 800;
+          line-height: 1.1;
         }
         .bslib-value-box .value-box-showcase {
-          font-size: 2rem;
-          opacity: 0.2;
+          opacity: 0.25;
+          padding: 4px !important;
+          position: absolute;
+          left: 14px;
+          top: 50%;
+          transform: translateY(-50%);
+          z-index: 0;
+          width: auto !important;
+          max-width: none !important;
+        }
+        .bslib-value-box .value-box-area {
+          padding: 6px 8px !important;
+          min-height: 0 !important;
+          display: flex !important;
+          flex-direction: column !important;
+          justify-content: center !important;
+          text-align: center !important;
+          width: 100% !important;
+          position: relative;
+          z-index: 1;
         }
         .vb-purple {
           background: linear-gradient(135deg, #6C5CE7, #a855f7) !important;
@@ -254,6 +285,10 @@ app_ui = ui.page_fluid(
           min-height: 240px;
           padding: 16px;
         }
+        .card.bslib-card.bslib-value-box .card-body {
+          min-height: auto !important;
+          padding: 6px 12px !important;
+        }
 
         /* Slider */
         .irs--shiny .irs-bar { background: var(--accent); border-top-color: var(--accent); border-bottom-color: var(--accent); }
@@ -283,8 +318,7 @@ app_ui = ui.page_fluid(
             grid-template-columns: 1fr 1fr !important;
           }
           h2 { font-size: 1.35rem; margin: 14px 0 8px; }
-          .bslib-value-box .value-box-value { font-size: 1.4rem; }
-          .bslib-value-box { min-height: 100px; }
+          .bslib-value-box .value-box-value { font-size: 1.15rem; }
           .container-fluid { padding: 0 12px; }
           .card.bslib-card .card-body { min-height: 180px; }
           #neighbourhood_map { min-height: 320px; }
@@ -297,9 +331,8 @@ app_ui = ui.page_fluid(
         /* Mobile */
         @media (max-width: 576px) {
           h2 { font-size: 1.15rem; margin: 10px 0 6px; }
-          .bslib-value-box .value-box-value { font-size: 1.2rem; }
-          .bslib-value-box .value-box-title { font-size: 0.7rem; }
-          .bslib-value-box { min-height: 80px; }
+          .bslib-value-box .value-box-value { font-size: 0.95rem; }
+          .bslib-value-box .value-box-title { font-size: 0.6rem; }
           .container-fluid { padding: 0 8px; }
           .card.bslib-card .card-header { font-size: 0.82rem; padding: 10px 14px; }
           .card.bslib-card .card-body { min-height: 160px; padding: 10px; }
@@ -388,14 +421,16 @@ app_ui = ui.page_fluid(
             ui.value_box(
                 "Permits Issued",
                 ui.output_text("permits_to_date"),
-                showcase=icon_svg("file-lines", width="40px"),
+                showcase=icon_svg("file-lines", width="22px"),
                 theme="primary",
+                showcase_layout="left center",
             ),
             ui.value_box(
                 "Avg Processing Time",
                 ui.output_text("avg_days"),
-                showcase=icon_svg("clock", width="40px"),
+                showcase=icon_svg("clock", width="22px"),
                 class_="vb-purple",
+                showcase_layout="left center",
             ),
             width=1/2,
             class_="kpi-wrap",
