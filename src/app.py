@@ -146,6 +146,7 @@ INITIAL_MAP_BOUNDS = padded_bounds(
 
 
 app_ui = ui.page_fluid(
+    ui.busy_indicators.use(spinners=False),
     ui.tags.link(
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap",
         rel="stylesheet",
@@ -178,7 +179,6 @@ app_ui = ui.page_fluid(
             }).addTo(_map);
             L.control.zoom({ position: 'bottomleft' }).addTo(_map);
             _map.fitBounds(msg.bounds);
-            _map.zoomIn(0.5);
         }
 
         if (_geoLayer) _map.removeLayer(_geoLayer);
@@ -369,6 +369,7 @@ app_ui = ui.page_fluid(
           border-radius: var(--radius);
           box-shadow: var(--shadow-sm);
           min-height: auto !important;
+          overflow: hidden !important;
           transition: box-shadow 0.2s, transform 0.2s;
           border: none;
           overflow: hidden;
@@ -399,6 +400,7 @@ app_ui = ui.page_fluid(
           font-size: 1.15rem;
           font-weight: 800;
           line-height: 1.1;
+          min-height: 1.27rem;
         }
         .bslib-value-box .value-box-showcase {
           opacity: 0.25;
@@ -582,7 +584,21 @@ app_ui = ui.page_fluid(
                     open="desktop",
                     width=280,
                 ),
-                ui.output_ui("empty_state_msg"),
+                ui.panel_conditional(
+                    "input.checkbox_group !== null && input.checkbox_group.length === 0",
+                    ui.tags.div(
+                        ui.tags.div(
+                            ui.tags.span("No filters selected", style="font-weight:700; font-size:1.1rem;"),
+                            ui.tags.br(),
+                            ui.tags.span(
+                                "Select at least one work type from the sidebar to view results.",
+                                style="opacity:0.7; font-size:0.9rem;",
+                            ),
+                            style="text-align:center; padding:32px 16px; color:var(--accent);",
+                        ),
+                        style="background:var(--accent-light); border:1px dashed var(--accent); border-radius:var(--radius); margin-bottom:12px;",
+                    ),
+                ),
                 ui.layout_column_wrap(
             ui.value_box(
                 "Permits Issued",
@@ -881,24 +897,6 @@ def server(input, output, session):
         days_taken_to_issue = days_taken_to_issue.dropna()
 
         return f"{days_taken_to_issue.mean():.1f} Days"
-
-    @render.ui
-    def empty_state_msg():
-        types = list(input.checkbox_group())
-        if len(types) == 0:
-            return ui.tags.div(
-                ui.tags.div(
-                    ui.tags.span("No filters selected", style="font-weight:700; font-size:1.1rem;"),
-                    ui.tags.br(),
-                    ui.tags.span(
-                        "Select at least one work type from the sidebar to view results.",
-                        style="opacity:0.7; font-size:0.9rem;",
-                    ),
-                    style="text-align:center; padding:32px 16px; color:var(--accent);",
-                ),
-                style="background:var(--accent-light); border:1px dashed var(--accent); border-radius:var(--radius); margin-bottom:12px;",
-            )
-        return None
 
     @render_altair
     def permit_volume_trend():
