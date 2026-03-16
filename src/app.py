@@ -79,8 +79,8 @@ def heat_fill_color(count, max_count):
 
 def legend_ticks(max_count):
     if max_count <= 0:
-        return [0, 0.0, 0]
-    return [0, round(max_count / 2, 1), max_count]
+        return [0, 0]
+    return [0, max_count]
 
 
 def format_legend_tick(value):
@@ -921,12 +921,14 @@ def server(input, output, session):
             zoom=12,
             layout={'height': '420px'},
             basemap=ipyleaflet.basemaps.CartoDB.Positron,
+            zoom_control=False,
             zoom_delta=0.5,
             zoom_snap=0.5,
             scroll_wheel_zoom=False,
             touch_zoom=True,
             double_click_zoom=False,
         )
+        m.add(ipyleaflet.ZoomControl(position="bottomleft"))
 
         counts = dict(zip(df[AREA], df["permit_count"])) if not df.empty else {}
         max_count = int(df["permit_count"].max()) if not df.empty else 0
@@ -1020,31 +1022,24 @@ def server(input, output, session):
         ]
 
         hover_info = HTML(value="")
-        hover_control = ipyleaflet.WidgetControl(widget=hover_info, position="topright")
-        min_tick, mid_tick, max_tick = legend_ticks(max_count)
+        hover_control = ipyleaflet.WidgetControl(widget=hover_info, position="topleft")
+        min_tick, max_tick = legend_ticks(max_count)
         gradient_css = ", ".join(
             f"{color} {round(index * 100 / (len(MAP_HEAT_COLORS) - 1), 1)}%"
             for index, color in enumerate(reversed(MAP_HEAT_COLORS))
         )
         legend_info = HTML(
             value=(
-                "<div style='background:rgba(255,255,255,0.96);padding:10px 12px;"
-                "border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.10);"
-                "font-size:12px;line-height:1.3;'>"
+                "<div style='height:420px;background:rgba(255,255,255,0.96);padding:6px 4px;"
+                "border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,0.08);"
+                "font-size:12px;line-height:1.3;display:flex;flex-direction:column;"
+                "align-items:center;justify-content:space-between;min-width:0;'>"
                 "<b>Permit count</b>"
-                "<div style='margin-top:8px;margin-bottom:6px;display:flex;"
-                "justify-content:space-between;font-weight:600;color:#4C1D95;'>"
-                f"<span>High</span><span>Mid</span><span>Low</span>"
-                "</div>"
-                "<div style='height:14px;border-radius:999px;"
-                f"background:linear-gradient(90deg, {gradient_css});"
+                f"<span style='margin-top:4px;color:#4B5563;white-space:nowrap;'>{format_legend_tick(max_tick)}</span>"
+                "<div style='width:14px;flex:1;border-radius:999px;margin:4px 0;"
+                f"background:linear-gradient(180deg, {gradient_css});"
                 "border:1px solid rgba(91,33,182,0.16);'></div>"
-                "<div style='margin-top:6px;display:flex;justify-content:space-between;"
-                "color:#4B5563;'>"
-                f"<span>{format_legend_tick(max_tick)}</span>"
-                f"<span>{format_legend_tick(mid_tick)}</span>"
-                f"<span>{format_legend_tick(min_tick)}</span>"
-                "</div>"
+                f"<span style='color:#4B5563;white-space:nowrap;'>{format_legend_tick(min_tick)}</span>"
                 "</div>"
             )
         )
