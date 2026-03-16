@@ -6,7 +6,6 @@ from shinywidgets import output_widget, render_widget, render_altair, reactive_r
 from faicons import icon_svg
 import pandas as pd
 import ipyleaflet
-from ipywidgets import HTML
 import altair as alt
 import chatlas as clt
 import os
@@ -68,10 +67,6 @@ TYPE_CHOICES = sorted(
 
 MAP_HEAT_COLORS = ["#F5F3FF", "#DDD6FE", "#A78BFA", "#7C3AED", "#5B21B6"]
 MAP_HEAT_CMAP = LinearSegmentedColormap.from_list("permit_heat", MAP_HEAT_COLORS)
-IPYLEAFLET_TOOLTIP = getattr(ipyleaflet, "Tooltip", None)
-if IPYLEAFLET_TOOLTIP is None:
-    leaflet_module = getattr(ipyleaflet, "leaflet", None)
-    IPYLEAFLET_TOOLTIP = getattr(leaflet_module, "Tooltip", None)
 
 
 def heat_fill_color(count, max_count):
@@ -1055,108 +1050,16 @@ def server(input, output, session):
                 )
                 m.add(selected_layer)
 
-        tick_values = list(reversed(legend_ticks(max_count)))
-        gradient_css = ", ".join(
-            f"{color} {round(index * 100 / (len(MAP_HEAT_COLORS) - 1), 1)}%"
-            for index, color in enumerate(reversed(MAP_HEAT_COLORS))
-        )
-        tick_labels_html = "".join(
-            f"<span>{format_legend_tick(value)}</span>"
-            for value in tick_values
-        )
-        legend_info = HTML(
-            value=(
-                "<div style='height:392px;background:rgba(255,255,255,0.96);padding:6px 4px;"
-                "border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,0.08);"
-                "font-size:11px;line-height:1.1;display:flex;flex-direction:column;"
-                "align-items:center;justify-content:space-between;min-width:0;'>"
-                "<b style='font-size:11px;'>Permit count</b>"
-                "<div style='flex:1;display:flex;align-items:stretch;gap:4px;margin-top:3px;'>"
-                "<div style='width:12px;flex:1;border-radius:999px;"
-                f"background:linear-gradient(180deg, {gradient_css});"
-                "border:1px solid rgba(91,33,182,0.16);'></div>"
-                "<div style='height:100%;display:flex;flex-direction:column;"
-                "justify-content:space-between;color:#4B5563;white-space:nowrap;"
-                "font-size:10px;'>"
-                f"{tick_labels_html}"
-                "</div>"
-                "</div>"
-                "</div>"
-            )
-        )
-        legend_control = ipyleaflet.WidgetControl(widget=legend_info, position="bottomright")
-        m.add(legend_control)
-
-        hover_info = HTML(value="")
-        hover_control = ipyleaflet.WidgetControl(widget=hover_info, position="topleft")
-        base_tooltip = None
-        selected_tooltip = None
-        if IPYLEAFLET_TOOLTIP is not None:
-            base_tooltip = IPYLEAFLET_TOOLTIP(
-                content="",
-                sticky=True,
-                direction="auto",
-                opacity=0.95,
-            )
-            geo_layer.tooltip = base_tooltip
-
-        def hide_hover_info():
-            if base_tooltip is not None:
-                base_tooltip.content = ""
-            else:
-                hover_info.value = ""
-                if hover_control in m.controls:
-                    m.remove(hover_control)
-            if selected_tooltip is not None:
-                selected_tooltip.content = ""
-
-        def update_hover_info(**kwargs):
-            props = kwargs.get("properties") or {}
-            name = props.get("name")
-            count = props.get("permit_count", 0)
-
-            if not name:
-                hide_hover_info()
-                return
-
-            tooltip_html = f"<b>{name}</b><br>Permits: {count:,}"
-            if base_tooltip is not None:
-                base_tooltip.content = tooltip_html
-            else:
-                hover_info.value = tooltip_html
-                if hover_control not in m.controls:
-                    m.add(hover_control)
-            if selected_tooltip is not None:
-                selected_tooltip.content = tooltip_html
-
-        def clear_on_mouseout(**kwargs):
-            if kwargs.get("type") in ("mouseout", "mouseleave"):
-                hide_hover_info()
-
         def select_area_from_map(**kwargs):
             props = kwargs.get("properties") or {}
             area_name = props.get("name")
             if isinstance(area_name, str):
                 apply_area_selection(area_name)
 
-        if hasattr(geo_layer, "on_hover"):
-            geo_layer.on_hover(update_hover_info)
         if hasattr(geo_layer, "on_click"):
             geo_layer.on_click(select_area_from_map)
-        if selected_layer is not None and hasattr(selected_layer, "on_hover"):
-            if IPYLEAFLET_TOOLTIP is not None:
-                selected_tooltip = IPYLEAFLET_TOOLTIP(
-                    content="",
-                    sticky=True,
-                    direction="auto",
-                    opacity=0.95,
-                )
-                selected_layer.tooltip = selected_tooltip
-            selected_layer.on_hover(update_hover_info)
         if selected_layer is not None and hasattr(selected_layer, "on_click"):
             selected_layer.on_click(select_area_from_map)
-        if hasattr(m, "on_interaction"):
-            m.on_interaction(clear_on_mouseout)
 
         return m
 
