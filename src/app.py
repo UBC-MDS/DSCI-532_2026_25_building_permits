@@ -1,11 +1,9 @@
 from datetime import date
-import copy
 import json
 from shiny import App, reactive, render, ui
 from shinywidgets import output_widget, render_widget, render_altair, reactive_read
 from faicons import icon_svg
 import pandas as pd
-import ipyleaflet
 import altair as alt
 import chatlas as clt
 import os
@@ -152,6 +150,11 @@ app_ui = ui.page_fluid(
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap",
         rel="stylesheet",
     ),
+    ui.tags.link(
+        rel="stylesheet",
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
+    ),
+    ui.tags.script(src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"),
     ui.tags.style(
         """
         :root {
@@ -385,6 +388,7 @@ app_ui = ui.page_fluid(
         .irs--shiny .irs-from, .irs--shiny .irs-to, .irs--shiny .irs-single { background: var(--accent); }
 
         /* Map */
+        .leaflet-interactive:focus { outline: none; }
         #neighbourhood_map {
           min-height: 420px;
           display: block;
@@ -538,7 +542,7 @@ app_ui = ui.page_fluid(
                 ui.layout_columns(
             ui.card(
                 ui.card_header("Neighbourhood Permit Map"),
-                output_widget("neighbourhood_map"),
+                ui.output_ui("neighbourhood_map"),
                 full_screen=True,
             ),
             ui.card(
@@ -968,100 +972,123 @@ def server(input, output, session):
 
         return grouped
 
-    @render_widget
+    @render.ui
     def neighbourhood_map():
         df = map_df()
         active_area = selected_area.get()
 
-        center = (49.26, -123.12)
-        m = ipyleaflet.Map(
-            center=center,
-            zoom=12,
-            layout={'height': '420px'},
-            basemap=ipyleaflet.basemaps.CartoDB.Positron,
-            zoom_control=False,
-            zoom_delta=0.5,
-            zoom_snap=0.5,
-            scroll_wheel_zoom=False,
-            touch_zoom=True,
-            double_click_zoom=False,
-        )
-        m.add(ipyleaflet.ZoomControl(position="bottomleft"))
-        m.fit_bounds(INITIAL_MAP_BOUNDS)
-
         counts = dict(zip(df[AREA], df["permit_count"])) if not df.empty else {}
         max_count = int(df["permit_count"].max()) if not df.empty else 0
 
-        geojson_data = copy.deepcopy(neighbourhood_geojson)
-        for feature in geojson_data["features"]:
+        features_out = []
+        for feature in neighbourhood_geojson["features"]:
             area_name = feature["properties"]["name"]
             count = int(counts.get(area_name, 0))
-            feature["properties"]["permit_count"] = count
+            features_out.append({
+                "type": "Feature",
+                "geometry": feature["geometry"],
+                "properties": {
+                    "name": area_name,
+                    "permit_count": count,
+                    "fillColor": heat_fill_color(count, max_count),
+                    "fillOpacity": 0.72 if count > 0 else 0.28,
+                    "isSelected": area_name == active_area,
+                },
+            })
 
-        def feature_style(feature):
-            count = int(feature["properties"].get("permit_count", 0))
-            return {
-                "color": "#4B5563",
-                "weight": 1.2,
-                "dashArray": "6 4",
-                "fillColor": heat_fill_color(count, max_count),
-                "fillOpacity": 0.72 if count > 0 else 0.28,
-            }
+        geojson_str = json.dumps({"type": "FeatureCollection", "features": features_out})
+        bounds_str = json.dumps(INITIAL_MAP_BOUNDS)
 
-        geo_layer = ipyleaflet.GeoJSON(
-            data=geojson_data,
-            style_callback=feature_style,
-            hover_style={
-                "color": "#2563EB",
-                "weight": 2.2,
-                "dashArray": "6 4",
-                "fillOpacity": 0.82,
-            },
+        script = f"""
+(function() {{
+    if (window._nbhdMap) {{
+        window._nbhdMap.remove();
+        window._nbhdMap = null;
+    }}
+    var container = document.getElementById('leaflet-nbhd-map');
+    if (!container) return;
+
+    var map = L.map(container, {{
+        zoomControl: false,
+        scrollWheelZoom: false,
+        doubleClickZoom: false,
+    }});
+    window._nbhdMap = map;
+
+    L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 19,
+    }}).addTo(map);
+
+    L.control.zoom({{ position: 'bottomleft' }}).addTo(map);
+
+    var geojsonData = {geojson_str};
+    var bounds = {bounds_str};
+
+    var geoLayer = L.geoJSON(geojsonData, {{
+        style: function(feature) {{
+            if (feature.properties.isSelected) {{
+                return {{
+                    color: '#7C3AED',
+                    weight: 4,
+                    dashArray: '10 4',
+                    fillColor: feature.properties.fillColor,
+                    fillOpacity: feature.properties.fillOpacity,
+                }};
+            }}
+            return {{
+                color: '#4B5563',
+                weight: 1.2,
+                dashArray: '6 4',
+                fillColor: feature.properties.fillColor,
+                fillOpacity: feature.properties.fillOpacity,
+            }};
+        }},
+        onEachFeature: function(feature, layer) {{
+            layer.on('click', function() {{
+                Shiny.setInputValue('map_click', feature.properties.name, {{priority: 'event'}});
+            }});
+            layer.on('mouseover', function(e) {{
+                e.target.setStyle({{
+                    color: '#2563EB',
+                    weight: 2.2,
+                    dashArray: '6 4',
+                    fillOpacity: 0.82,
+                }});
+                e.target.bringToFront();
+            }});
+            layer.on('mouseout', function(e) {{
+                geoLayer.resetStyle(e.target);
+            }});
+            layer.bindTooltip(
+                '<strong>' + feature.properties.name + '</strong><br>Permits: ' + feature.properties.permit_count,
+                {{ sticky: true }}
+            );
+        }},
+    }}).addTo(map);
+
+    map.fitBounds(bounds);
+}})();
+"""
+
+        return ui.tags.div(
+            ui.tags.div(
+                id="leaflet-nbhd-map",
+                style="height:420px; border-radius:8px; overflow:hidden;",
+            ),
+            ui.tags.script(script),
         )
-        m.add(geo_layer)
 
-        selected_layer = None
-        # Strong, persistent border highlight for selected neighbourhood.
-        if active_area != "All":
-            selected_feature = next(
-                (
-                    feature for feature in geojson_data["features"]
-                    if feature["properties"]["name"] == active_area
-                ),
-                None,
-            )
-            if selected_feature is not None:
-                selected_layer = ipyleaflet.GeoJSON(
-                    data={"type": "FeatureCollection", "features": [selected_feature]},
-                    style={
-                        "color": "#7C3AED",
-                        "weight": 4,
-                        "dashArray": "10 4",
-                        "dashOffset": "0",
-                        "fillOpacity": 0,
-                    },
-                    hover_style={
-                        "color": "#6D28D9",
-                        "weight": 4,
-                        "dashArray": "10 4",
-                        "dashOffset": "0",
-                        "fillOpacity": 0.06,
-                    },
-                )
-                m.add(selected_layer)
-
-        def select_area_from_map(**kwargs):
-            props = kwargs.get("properties") or {}
-            area_name = props.get("name")
-            if isinstance(area_name, str):
-                apply_area_selection(area_name)
-
-        if hasattr(geo_layer, "on_click"):
-            geo_layer.on_click(select_area_from_map)
-        if selected_layer is not None and hasattr(selected_layer, "on_click"):
-            selected_layer.on_click(select_area_from_map)
-
-        return m
+    @reactive.effect
+    @reactive.event(input.map_click)
+    def _sync_map_click():
+        try:
+            area_name = input.map_click()
+        except Exception:
+            return
+        if isinstance(area_name, str) and area_name in AREA_CHOICES:
+            apply_area_selection(area_name)
 
 
 app = App(app_ui, server)
