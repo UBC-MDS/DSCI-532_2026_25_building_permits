@@ -77,6 +77,7 @@ There are key performance indicator (KPI) cards to the right of the time series 
 
 The bar chart below the time series chart is meant to give planners and stakeholders a top-down summary of the neighbourhoods with the highest permits issued. This allows users to quickly analyze the neighbourhoods that are currently having the most development.  
 
-An interactive map to the right of the bar chart acts as a selector and visualizes the permit volume for each specific Vancouver neighbourhood based on the neighbourhood/coordinate features provided in the dataset. If the user clicks on a specific neighbourhood, the map re-filters the charts and KPIs to highlight only that neighbourhood. 
+An interactive map to the right of the bar chart acts as a selector and visualizes the permit volume for each specific Vancouver neighbourhood based on Vancouver neighbourhood boundaries. If the user clicks on a specific neighbourhood, the map re-filters the charts and KPIs to highlight only that neighbourhood. The top-neighbourhood bar chart also acts as a selector, so users can click either the map or the bar chart to drive the same neighbourhood filter. 
 
 A left side filter panel allows the user to filter by date range, type of work (e.g. New Building, etc.), and neighbourhood. These filters let users drill down on demand so the charts and KPIs update to be based on their selected criteria.
+
