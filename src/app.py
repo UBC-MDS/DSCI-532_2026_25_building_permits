@@ -10,6 +10,7 @@ from ipywidgets import HTML
 import altair as alt
 import chatlas as clt
 import os
+from matplotlib.colors import LinearSegmentedColormap, to_hex
 from querychat import QueryChat
 from dotenv import load_dotenv
 import ibis 
@@ -64,6 +65,28 @@ TYPE_CHOICES = sorted(
     .str.strip()
     .unique()
 )
+
+MAP_HEAT_COLORS = ["#F5F3FF", "#DDD6FE", "#A78BFA", "#7C3AED", "#5B21B6"]
+MAP_HEAT_CMAP = LinearSegmentedColormap.from_list("permit_heat", MAP_HEAT_COLORS)
+
+
+def heat_fill_color(count, max_count):
+    if max_count <= 0:
+        return "#E5E7EB"
+    scale_value = min(max(count / max_count, 0), 1)
+    return to_hex(MAP_HEAT_CMAP(scale_value))
+
+
+def legend_ticks(max_count):
+    if max_count <= 0:
+        return [0, 0.0, 0]
+    return [0, round(max_count / 2, 1), max_count]
+
+
+def format_legend_tick(value):
+    if float(value).is_integer():
+        return f"{int(value):,}"
+    return f"{value:,.1f}"
 
 
 app_ui = ui.page_fluid(
@@ -906,12 +929,23 @@ def server(input, output, session):
         )
 
         counts = dict(zip(df[AREA], df["permit_count"])) if not df.empty else {}
+        max_count = int(df["permit_count"].max()) if not df.empty else 0
 
         geojson_data = copy.deepcopy(neighbourhood_geojson)
         for feature in geojson_data["features"]:
             area_name = feature["properties"]["name"]
             count = int(counts.get(area_name, 0))
             feature["properties"]["permit_count"] = count
+
+        def feature_style(feature):
+            count = int(feature["properties"].get("permit_count", 0))
+            return {
+                "color": "#4B5563",
+                "weight": 1.2,
+                "dashArray": "6 4",
+                "fillColor": heat_fill_color(count, max_count),
+                "fillOpacity": 0.72 if count > 0 else 0.28,
+            }
 
         def geometry_bounds(geometry):
             min_lat, min_lon = 90.0, 180.0
@@ -936,19 +970,12 @@ def server(input, output, session):
 
         geo_layer = ipyleaflet.GeoJSON(
             data=geojson_data,
-            style={
-                "color": "#4B5563",
-                "weight": 1.2,
-                "dashArray": "6 4",
-                "fillColor": "#E5E7EB",
-                "fillOpacity": 0.35,
-            },
+            style_callback=feature_style,
             hover_style={
                 "color": "#2563EB",
                 "weight": 2.2,
                 "dashArray": "6 4",
-                "fillColor": "#60A5FA",
-                "fillOpacity": 0.28,
+                "fillOpacity": 0.82,
             },
         )
         m.add(geo_layer)
@@ -972,8 +999,7 @@ def server(input, output, session):
                         "dashArray": "10 4",
                         "dashOffset": "0",
                         "className": "selected-neighbourhood-path",
-                        "fillColor": "#6C5CE7",
-                        "fillOpacity": 0.34,
+                        "fillOpacity": 0,
                     },
                     hover_style={
                         "color": "#6D28D9",
@@ -981,8 +1007,7 @@ def server(input, output, session):
                         "dashArray": "10 4",
                         "dashOffset": "0",
                         "className": "selected-neighbourhood-path",
-                        "fillColor": "#6C5CE7",
-                        "fillOpacity": 0.38,
+                        "fillOpacity": 0.06,
                     },
                 )
                 m.add(selected_layer)
@@ -996,6 +1021,35 @@ def server(input, output, session):
 
         hover_info = HTML(value="")
         hover_control = ipyleaflet.WidgetControl(widget=hover_info, position="topright")
+        min_tick, mid_tick, max_tick = legend_ticks(max_count)
+        gradient_css = ", ".join(
+            f"{color} {round(index * 100 / (len(MAP_HEAT_COLORS) - 1), 1)}%"
+            for index, color in enumerate(reversed(MAP_HEAT_COLORS))
+        )
+        legend_info = HTML(
+            value=(
+                "<div style='background:rgba(255,255,255,0.96);padding:10px 12px;"
+                "border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.10);"
+                "font-size:12px;line-height:1.3;'>"
+                "<b>Permit count</b>"
+                "<div style='margin-top:8px;margin-bottom:6px;display:flex;"
+                "justify-content:space-between;font-weight:600;color:#4C1D95;'>"
+                f"<span>High</span><span>Mid</span><span>Low</span>"
+                "</div>"
+                "<div style='height:14px;border-radius:999px;"
+                f"background:linear-gradient(90deg, {gradient_css});"
+                "border:1px solid rgba(91,33,182,0.16);'></div>"
+                "<div style='margin-top:6px;display:flex;justify-content:space-between;"
+                "color:#4B5563;'>"
+                f"<span>{format_legend_tick(max_tick)}</span>"
+                f"<span>{format_legend_tick(mid_tick)}</span>"
+                f"<span>{format_legend_tick(min_tick)}</span>"
+                "</div>"
+                "</div>"
+            )
+        )
+        legend_control = ipyleaflet.WidgetControl(widget=legend_info, position="bottomright")
+        m.add(legend_control)
 
         def hide_hover_info():
             hover_info.value = ""
