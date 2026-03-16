@@ -4,7 +4,7 @@
 
 | # | Job Story | Status | Notes |
 |---|-----------|--------|-------|
-| 1 | As a real estate developer, I want to visually see permit distribution per neighbourhood on an interactive map I can click/filter on. This will allow me to identify neighbourhoods with high development activity and potential profitable investment areas. | ✅ Implemented | `map_df` and `neighbourhood_map` implemented using `ipyleaflet` with neighbourhood polygon geometry and click-to-select behaviour. |
+| 1 | As a real estate developer, I want to visually see permit distribution per neighbourhood on an interactive map I can click/filter on. This will allow me to identify neighbourhoods with high development activity and potential profitable investment areas. | ✅ Implemented | `map_df` and `_update_neighbourhood_map` implemented as a **choropleth heatmap** using a pure Leaflet.js map (via `session.send_custom_message`). Each neighbourhood polygon is filled with a colour from a purple gradient scaled to its permit count relative to the maximum, with a vertical gradient legend showing the permit count scale. Replaced `ipyleaflet` to ensure compatibility with Posit Cloud. |
 | 2 | As a real estate developer, I want to see the average time it takes for a permit to be approved by the city (issued date minus applied date) by neighbourhood and category so that I can see overall approval timelines when planning a development project. |  ✅ Implemented |  Calculates average processing time from the filtered_df. |
 | 3 | As an end user, when I adjust the date range, permit type, or neighbourhood filters, I want all the dashboard visuals to update dynamically so I can change my view of the dashboard on the fly. | ✅ Implemented | Components update based on sidebar filters and linked output-component click interactions. |
 | 4 | When analyzing development activity in Vancouver, I want to see the total number of permits issued within my preferred filters so I can quickly gauge the construction activity for specific times and areas. | ✅ Implemented | Calculates permits_to_date from filtered_df. 
@@ -32,8 +32,10 @@ This option fits the dashboard because neighbourhood exploration is the main wor
 | permits_to_date | Output | `ui.output_text()` + `@render.text` | `filtered_df` | #4 |
 | avg_days | Output | `ui.output_text()` + `@render.text` | `filtered_df` | #2 |
 | map_df | Reactive calculation | `@reactive.calc` | `filtered_df` | #1 |
-| neighbourhood_map | Output | `ui.output_widget()` + `@render_widget` | `map_df`, `selected_area` | #1, #8 |
-| permit_volume_over_time_graph | Output | `ui.output_widget()` + `@render_widget` | `filtered_df` | #6 |
+| neighbourhood_map | Static UI element | `ui.tags.div` (Leaflet.js container) | — | #1, #8 |
+| _update_neighbourhood_map | Reactive effect | `@reactive.effect` (async) + `session.send_custom_message` | `map_df`, `selected_area` | #1, #8 |
+| _sync_map_click | Reactive effect | `@reactive.effect` + `@reactive.event(input.map_click)` | `input.map_click` (set via `Shiny.setInputValue` from JS) | #8 |
+| permit_volume_over_time_graph | Output | `ui.output_widget()` + `@render_altair` | `filtered_df` | #6 |
 | top_neighborhoods | Output | `ui.output_widget()` + `@render_altair` | `filtered_df`, `selected_area`, `input.top_n` | #7, #8 |
 | _sync_top_neighborhood_click | Reactive effect | `@reactive.effect` + `reactive_read()` | `top_neighborhoods.widget.selections` | #8 |
 
@@ -69,25 +71,25 @@ This option fits the dashboard because neighbourhood exploration is the main wor
 
 #### Reactive Calc 2: `map_df`
 
-- **Inputs**: 
+- **Inputs**:
 
     - `filtered_df`
 
-- **Transformations**: 
+- **Transformations**:
 
-    Aggregates `filtered_df` to counts by neighbourhood so the dashboard can join permit totals onto Vancouver neighbourhood polygon geometry for mapping.
-    
-- **Outputs That Consume filtered_df**: 
+    Aggregates `filtered_df` to counts by neighbourhood so the dashboard can join permit totals onto Vancouver neighbourhood polygon geometry for the choropleth heatmap. The per-neighbourhood counts are used to compute heat-fill colours (a purple gradient scaled from the minimum to the maximum count) that are embedded in the GeoJSON properties before being sent to the client.
 
-    - `neighbourhood_map`: plots the interactive map from `map_df`.
+- **Outputs That Consume map_df**:
+
+    - `_update_neighbourhood_map`: pushes updated GeoJSON (with per-neighbourhood fill colours, permit counts, and selection state) to the client via `session.send_custom_message`. The Leaflet.js map running in the browser replaces only its GeoJSON layer — the map itself is never recreated, avoiding zoom animations.
 
 #### Reactive Link: `selected_area`
 
 - **Inputs**:
 
     - `input.area`
-    - map polygon click events
-    - top-neighbourhood bar click events
+    - map polygon click events (via `input.map_click`, set by `Shiny.setInputValue` in JS)
+    - top-neighbourhood bar click events (via `reactive_read` on Altair widget selections)
 
 - **Transformations**:
 
@@ -96,6 +98,6 @@ This option fits the dashboard because neighbourhood exploration is the main wor
 - **Outputs That Consume selected_area**:
 
     - `filtered_df`
-    - `neighbourhood_map`
+    - `_update_neighbourhood_map`
     - `top_neighborhoods`
 
