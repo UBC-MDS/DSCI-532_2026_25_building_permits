@@ -514,6 +514,34 @@ def server(input, output, session):
     selected_area = reactive.Value("All")
     qc_vals = query_chat.server()
 
+    def get_time_axis(start, end):
+        '''
+        Formats the time axis as yearly if there is a wide date range (over 2 years)
+        Otherwise formats the time axis as month/yaer if the date range is shorter.
+        '''
+        start = pd.to_datetime(start)
+        end = pd.to_datetime(end)
+        days = (end - start).days
+
+        # if there is a wide date range, show years on axis
+        if days > 730:
+            return alt.Axis(
+                title = "Year",
+                format = "%Y",
+                tickCount = "year",
+                titleFontWeight = "bold",
+                labelAngle = 0
+            )
+        
+        # else return shorter date range 
+        return alt.Axis(
+            title="Month",
+            format="%b %Y",
+            tickCount=8,
+            titleFontWeight="bold",
+            labelAngle=0
+        )
+
     @reactive.effect
     def _sync_selected_area():
         area = input.area()
@@ -546,13 +574,24 @@ def server(input, output, session):
             df.groupby('month')
             .size()
             .reset_index(name='count')
+            .sort_values('month')
         )
 
+        start = monthly["month"].min()
+        end = monthly["month"].max()
+
+        axis_config = get_time_axis(start, end)
+
         base = alt.Chart(monthly).encode(
-            x=alt.X('month:T', title='Year',
-                    axis=alt.Axis(titleFontWeight='bold')),
-            y=alt.Y('count:Q', title='Count',
-                    axis=alt.Axis(titleFontWeight='bold')),
+            x=alt.X(
+                'month:T',
+                axis=axis_config
+            ),
+            y=alt.Y(
+                'count:Q', 
+                title='Count',
+                axis=alt.Axis(titleFontWeight='bold')
+            ),
         )
 
         line = base.mark_line(color="#6C5CE7", strokeWidth=2.5)
@@ -701,15 +740,23 @@ def server(input, output, session):
             df.groupby('month')
             .size()
             .reset_index(name='count')
+            .sort_values('month')
         )
 
         start, end = input.date_range()
+        axis_config = get_time_axis(start, end)
 
         base = alt.Chart(monthly).encode(
-            x=alt.X('month:T', scale=alt.Scale(domain=[str(start), str(end)]), title='Year',
-                    axis=alt.Axis(titleFontWeight='bold')),
-            y=alt.Y('count:Q', title='Count',
-                    axis=alt.Axis(titleFontWeight='bold')),
+            x=alt.X(
+                'month:T', 
+                scale=alt.Scale(domain=[pd.to_datetime(start), pd.to_datetime(end)]),
+                axis=axis_config
+            ),
+            y=alt.Y(
+                'count:Q', 
+                title='Count',
+                axis=alt.Axis(titleFontWeight='bold')
+            ),
         )
 
         line = base.mark_line(color="#6C5CE7", strokeWidth=2.5)
