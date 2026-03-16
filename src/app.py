@@ -794,21 +794,25 @@ def server(input, output, session):
     def top_neighborhoods():
         df = filtered_df().copy()
         n = input.top_n()
+        active_area = selected_area.get()
 
         top = (
-            df.groupby('GeoLocalArea')
+            df.groupby(AREA)
             .size()
             .reset_index(name='count')
             .nlargest(n, 'count')
             .sort_values('count', ascending=False)
         )
 
+        top["is_selected"] = top[AREA].eq(active_area)
+
         selected_bar = alt.selection_point(
             name="selected_bar",
             fields=[AREA],
             on="click",
             clear=False,
-            empty=False,
+            empty=True,
+            toggle=False,
         )
 
         chart = (
@@ -816,14 +820,24 @@ def server(input, output, session):
             .mark_bar()
             .encode(
                 x=alt.X('count:Q', title='Permit Count'),
-                y=alt.Y('GeoLocalArea:N', sort='-x', title='Neighborhood',
+                y=alt.Y(f'{AREA}:N', sort='-x', title='Neighborhood',
                         axis=alt.Axis(titleFontWeight='bold')),
                 color=alt.condition(
-                    selected_bar,
+                    alt.datum.is_selected,
                     alt.value("#6C5CE7"),
                     alt.value("#C8BFF7"),
                 ),
-                tooltip=['GeoLocalArea', 'count']
+                stroke=alt.condition(
+                    alt.datum.is_selected,
+                    alt.value("#5A4BD1"),
+                    alt.value("#C8BFF7"),
+                ),
+                strokeWidth=alt.condition(
+                    alt.datum.is_selected,
+                    alt.value(1.2),
+                    alt.value(0),
+                ),
+                tooltip=[AREA, 'count']
             )
             .add_params(selected_bar)
             .properties(background="transparent")
@@ -836,10 +850,19 @@ def server(input, output, session):
         selection = reactive_read(top_neighborhoods.widget.selections, "selected_bar")
         area_name = None
 
+        if hasattr(selection, "value"):
+            selection = selection.value
+
         if isinstance(selection, dict):
             area_name = selection.get(AREA)
             if isinstance(area_name, list) and area_name:
                 area_name = area_name[0]
+            elif not isinstance(area_name, str):
+                value = selection.get("value")
+                if isinstance(value, list) and value:
+                    first = value[0]
+                    if isinstance(first, dict):
+                        area_name = first.get(AREA)
         elif isinstance(selection, list) and selection:
             first = selection[0]
             if isinstance(first, dict):
