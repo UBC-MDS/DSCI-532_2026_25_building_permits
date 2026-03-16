@@ -178,6 +178,14 @@ app_ui = ui.page_fluid(
           padding-bottom: 8px;
         }
 
+        @keyframes selected-neighbourhood-dash {
+          to { stroke-dashoffset: -28; }
+        }
+
+        .selected-neighbourhood-path {
+          animation: selected-neighbourhood-dash 1.2s linear infinite;
+        }
+
         .btn.btn-default, .btn.btn-primary {
           width: 100%;
           background: linear-gradient(135deg, #6C5CE7, #5A4BD1);
@@ -410,6 +418,7 @@ app_ui = ui.page_fluid(
                     }
                   }
                   bindAreaFocusClear();
+
                 });
                 """
             ),
@@ -916,7 +925,7 @@ def server(input, output, session):
                 "weight": 2.2,
                 "dashArray": "6 4",
                 "fillColor": "#60A5FA",
-                "fillOpacity": 0.45,
+                "fillOpacity": 0.28,
             },
         )
         m.add(geo_layer)
@@ -935,18 +944,22 @@ def server(input, output, session):
                 selected_layer = ipyleaflet.GeoJSON(
                     data={"type": "FeatureCollection", "features": [selected_feature]},
                     style={
-                        "color": "#C2410C",
-                        "weight": 4.5,
-                        "dashArray": "2 0",
-                        "fillColor": "#F59E0B",
-                        "fillOpacity": 0.14,
+                        "color": "#7C3AED",
+                        "weight": 4,
+                        "dashArray": "10 4",
+                        "dashOffset": "0",
+                        "className": "selected-neighbourhood-path",
+                        "fillColor": "#6C5CE7",
+                        "fillOpacity": 0.34,
                     },
                     hover_style={
-                        "color": "#9A3412",
-                        "weight": 5,
-                        "dashArray": "2 0",
-                        "fillColor": "#F59E0B",
-                        "fillOpacity": 0.22,
+                        "color": "#6D28D9",
+                        "weight": 4,
+                        "dashArray": "10 4",
+                        "dashOffset": "0",
+                        "className": "selected-neighbourhood-path",
+                        "fillColor": "#6C5CE7",
+                        "fillOpacity": 0.38,
                     },
                 )
                 m.add(selected_layer)
@@ -1017,9 +1030,14 @@ def server(input, output, session):
                 # Keep a wider local context when a single neighbourhood is selected.
                 lat_pad = max(0.02, (north - south) * 0.50)
                 lon_pad = max(0.02, (east - west) * 0.50)
+            padded_south = south - lat_pad
+            padded_west = west - lon_pad
+            padded_north = north + lat_pad
+            padded_east = east + lon_pad
+
             m.fit_bounds([
-                (south - lat_pad, west - lon_pad),
-                (north + lat_pad, east + lon_pad),
+                (padded_south, padded_west),
+                (padded_north, padded_east),
             ])
 
         return m
