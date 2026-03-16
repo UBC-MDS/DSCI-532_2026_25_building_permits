@@ -102,6 +102,56 @@ def format_legend_tick(value):
     return f"{value:.1f}"
 
 
+def geometry_bounds(geometry):
+    min_lat, min_lon = 90.0, 180.0
+    max_lat, max_lon = -90.0, -180.0
+
+    def walk(coords):
+        nonlocal min_lat, min_lon, max_lat, max_lon
+        if not coords:
+            return
+        if isinstance(coords[0], (int, float)) and len(coords) >= 2:
+            lon, lat = float(coords[0]), float(coords[1])
+            min_lat = min(min_lat, lat)
+            max_lat = max(max_lat, lat)
+            min_lon = min(min_lon, lon)
+            max_lon = max(max_lon, lon)
+            return
+        for item in coords:
+            walk(item)
+
+    walk(geometry.get("coordinates", []))
+    return min_lat, min_lon, max_lat, max_lon
+
+
+def padded_bounds(features, lat_pad_ratio=0.10, lon_pad_ratio=0.10, min_pad=0.01):
+    south, west = 90.0, 180.0
+    north, east = -90.0, -180.0
+
+    for feature in features:
+        min_lat, min_lon, max_lat, max_lon = geometry_bounds(feature["geometry"])
+        south = min(south, min_lat)
+        west = min(west, min_lon)
+        north = max(north, max_lat)
+        east = max(east, max_lon)
+
+    lat_pad = max(min_pad, (north - south) * lat_pad_ratio)
+    lon_pad = max(min_pad, (east - west) * lon_pad_ratio)
+
+    return [
+        (south - lat_pad, west - lon_pad),
+        (north + lat_pad, east + lon_pad),
+    ]
+
+
+INITIAL_MAP_BOUNDS = padded_bounds(
+    neighbourhood_geojson["features"],
+    lat_pad_ratio=0.12,
+    lon_pad_ratio=0.12,
+    min_pad=0.012,
+)
+
+
 app_ui = ui.page_fluid(
     ui.tags.link(
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap",
@@ -942,6 +992,7 @@ def server(input, output, session):
             double_click_zoom=False,
         )
         m.add(ipyleaflet.ZoomControl(position="bottomleft"))
+        m.fit_bounds(INITIAL_MAP_BOUNDS)
 
         counts = dict(zip(df[AREA], df["permit_count"])) if not df.empty else {}
         max_count = int(df["permit_count"].max()) if not df.empty else 0
@@ -961,27 +1012,6 @@ def server(input, output, session):
                 "fillColor": heat_fill_color(count, max_count),
                 "fillOpacity": 0.72 if count > 0 else 0.28,
             }
-
-        def geometry_bounds(geometry):
-            min_lat, min_lon = 90.0, 180.0
-            max_lat, max_lon = -90.0, -180.0
-
-            def walk(coords):
-                nonlocal min_lat, min_lon, max_lat, max_lon
-                if not coords:
-                    return
-                if isinstance(coords[0], (int, float)) and len(coords) >= 2:
-                    lon, lat = float(coords[0]), float(coords[1])
-                    min_lat = min(min_lat, lat)
-                    max_lat = max(max_lat, lat)
-                    min_lon = min(min_lon, lon)
-                    max_lon = max(max_lon, lon)
-                    return
-                for item in coords:
-                    walk(item)
-
-            walk(geometry.get("coordinates", []))
-            return min_lat, min_lon, max_lat, max_lon
 
         geo_layer = ipyleaflet.GeoJSON(
             data=geojson_data,
@@ -1013,7 +1043,6 @@ def server(input, output, session):
                         "weight": 4,
                         "dashArray": "10 4",
                         "dashOffset": "0",
-                        "className": "selected-neighbourhood-path",
                         "fillOpacity": 0,
                     },
                     hover_style={
@@ -1021,18 +1050,10 @@ def server(input, output, session):
                         "weight": 4,
                         "dashArray": "10 4",
                         "dashOffset": "0",
-                        "className": "selected-neighbourhood-path",
                         "fillOpacity": 0.06,
                     },
                 )
                 m.add(selected_layer)
-
-        # Neighbourhood features currently visible after filtering.
-        selected_areas = set(df[AREA].tolist()) if not df.empty else set()
-        relevant_features = [
-            f for f in geojson_data["features"]
-            if not selected_areas or f["properties"]["name"] in selected_areas
-        ]
 
         tick_values = list(reversed(legend_ticks(max_count)))
         gradient_css = ", ".join(
@@ -1136,33 +1157,6 @@ def server(input, output, session):
             selected_layer.on_click(select_area_from_map)
         if hasattr(m, "on_interaction"):
             m.on_interaction(clear_on_mouseout)
-
-        # Auto-zoom so all filtered/selected neighbourhoods are visible.
-        if relevant_features:
-            south, west = 90.0, 180.0
-            north, east = -90.0, -180.0
-            for feature in relevant_features:
-                min_lat, min_lon, max_lat, max_lon = geometry_bounds(feature["geometry"])
-                south = min(south, min_lat)
-                west = min(west, min_lon)
-                north = max(north, max_lat)
-                east = max(east, max_lon)
-            if active_area == "All":
-                lat_pad = max(0.002, (north - south) * 0.05)
-                lon_pad = max(0.002, (east - west) * 0.05)
-            else:
-                # Keep a wider local context when a single neighbourhood is selected.
-                lat_pad = max(0.02, (north - south) * 0.50)
-                lon_pad = max(0.02, (east - west) * 0.50)
-            padded_south = south - lat_pad
-            padded_west = west - lon_pad
-            padded_north = north + lat_pad
-            padded_east = east + lon_pad
-
-            m.fit_bounds([
-                (padded_south, padded_west),
-                (padded_north, padded_east),
-            ])
 
         return m
 
