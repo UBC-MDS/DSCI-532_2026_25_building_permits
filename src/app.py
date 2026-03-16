@@ -155,6 +155,82 @@ app_ui = ui.page_fluid(
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
     ),
     ui.tags.script(src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"),
+    ui.tags.script("""
+(function() {
+    var _map = null, _geoLayer = null, _legend = null;
+
+    Shiny.addCustomMessageHandler('update_nbhd_map', function(msg) {
+        var container = document.getElementById('leaflet-nbhd-map');
+        if (!container) return;
+
+        if (!_map) {
+            _map = L.map(container, {
+                zoomControl: false,
+                scrollWheelZoom: false,
+                doubleClickZoom: false,
+                zoomDelta: 0.5,
+                zoomSnap: 0.5,
+            });
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 19,
+            }).addTo(_map);
+            L.control.zoom({ position: 'bottomleft' }).addTo(_map);
+            _map.fitBounds(msg.bounds);
+            _map.zoomIn(0.5);
+        }
+
+        if (_geoLayer) _map.removeLayer(_geoLayer);
+        _geoLayer = L.geoJSON(msg.data, {
+            style: function(feature) {
+                if (feature.properties.isSelected) {
+                    return { color: '#7C3AED', weight: 4, dashArray: '10 4',
+                             fillColor: feature.properties.fillColor,
+                             fillOpacity: feature.properties.fillOpacity };
+                }
+                return { color: '#4B5563', weight: 1.2, dashArray: '6 4',
+                         fillColor: feature.properties.fillColor,
+                         fillOpacity: feature.properties.fillOpacity };
+            },
+            onEachFeature: function(feature, layer) {
+                layer.on('click', function() {
+                    Shiny.setInputValue('map_click', feature.properties.name, { priority: 'event' });
+                });
+                layer.on('mouseover', function(e) {
+                    e.target.setStyle({ color: '#2563EB', weight: 2.2, dashArray: '6 4', fillOpacity: 0.82 });
+                    e.target.bringToFront();
+                });
+                layer.on('mouseout', function(e) { _geoLayer.resetStyle(e.target); });
+                layer.bindTooltip(
+                    '<strong>' + feature.properties.name + '</strong><br>Permits: ' + feature.properties.permit_count,
+                    { sticky: true }
+                );
+            },
+        }).addTo(_map);
+
+        if (_legend) _map.removeControl(_legend);
+        _legend = L.control({ position: 'bottomright' });
+        _legend.onAdd = function() {
+            var div = L.DomUtil.create('div');
+            div.style.cssText = 'background:#fff;border-radius:8px;padding:8px 10px;box-shadow:0 1px 5px rgba(0,0,0,0.15);font-family:Inter,sans-serif;font-size:0.72rem;color:#2D3436;min-width:54px;';
+            var lbl = msg.tick_labels;
+            div.innerHTML =
+                '<div style="font-weight:700;font-size:0.73rem;color:#6C5CE7;margin-bottom:6px;text-align:center;">Permit Count</div>' +
+                '<div style="display:flex;align-items:stretch;gap:6px;">' +
+                    '<div style="width:14px;height:160px;border-radius:3px;background:linear-gradient(to bottom,#5B21B6,#7C3AED,#A78BFA,#DDD6FE,#F5F3FF);flex-shrink:0;"></div>' +
+                    '<div style="display:flex;flex-direction:column;justify-content:space-between;height:160px;line-height:1;">' +
+                        '<span>' + lbl[0] + '</span><span>' + lbl[1] + '</span><span>' + lbl[2] + '</span>' +
+                        '<span>' + lbl[3] + '</span><span>' + lbl[4] + '</span>' +
+                    '</div>' +
+                '</div>';
+            L.DomEvent.disableClickPropagation(div);
+            return div;
+        };
+        _legend.addTo(_map);
+    });
+})();
+"""),
     ui.tags.style(
         """
         :root {
@@ -389,12 +465,7 @@ app_ui = ui.page_fluid(
 
         /* Map */
         .leaflet-interactive:focus { outline: none; }
-        #neighbourhood_map {
-          min-height: 420px;
-          display: block;
-          border-radius: 8px;
-          overflow: hidden;
-        }
+        #leaflet-nbhd-map { border-radius: 8px; overflow: hidden; }
 
         /* Footer */
         .app-footer {
@@ -542,7 +613,7 @@ app_ui = ui.page_fluid(
                 ui.layout_columns(
             ui.card(
                 ui.card_header("Neighbourhood Permit Map"),
-                ui.output_ui("neighbourhood_map"),
+                ui.tags.div(id="leaflet-nbhd-map", style="height:420px;"),
                 full_screen=True,
             ),
             ui.card(
@@ -972,8 +1043,8 @@ def server(input, output, session):
 
         return grouped
 
-    @render.ui
-    def neighbourhood_map():
+    @reactive.effect
+    async def _update_neighbourhood_map():
         df = map_df()
         active_area = selected_area.get()
 
@@ -996,89 +1067,14 @@ def server(input, output, session):
                 },
             })
 
-        geojson_str = json.dumps({"type": "FeatureCollection", "features": features_out})
-        bounds_str = json.dumps(INITIAL_MAP_BOUNDS)
+        tick_values = [max_count, max_count * 3 // 4, max_count // 2, max_count // 4, 0]
+        tick_labels = [format_legend_tick(float(v)) for v in tick_values]
 
-        script = f"""
-(function() {{
-    if (window._nbhdMap) {{
-        window._nbhdMap.remove();
-        window._nbhdMap = null;
-    }}
-    var container = document.getElementById('leaflet-nbhd-map');
-    if (!container) return;
-
-    var map = L.map(container, {{
-        zoomControl: false,
-        scrollWheelZoom: false,
-        doubleClickZoom: false,
-    }});
-    window._nbhdMap = map;
-
-    L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 19,
-    }}).addTo(map);
-
-    L.control.zoom({{ position: 'bottomleft' }}).addTo(map);
-
-    var geojsonData = {geojson_str};
-    var bounds = {bounds_str};
-
-    var geoLayer = L.geoJSON(geojsonData, {{
-        style: function(feature) {{
-            if (feature.properties.isSelected) {{
-                return {{
-                    color: '#7C3AED',
-                    weight: 4,
-                    dashArray: '10 4',
-                    fillColor: feature.properties.fillColor,
-                    fillOpacity: feature.properties.fillOpacity,
-                }};
-            }}
-            return {{
-                color: '#4B5563',
-                weight: 1.2,
-                dashArray: '6 4',
-                fillColor: feature.properties.fillColor,
-                fillOpacity: feature.properties.fillOpacity,
-            }};
-        }},
-        onEachFeature: function(feature, layer) {{
-            layer.on('click', function() {{
-                Shiny.setInputValue('map_click', feature.properties.name, {{priority: 'event'}});
-            }});
-            layer.on('mouseover', function(e) {{
-                e.target.setStyle({{
-                    color: '#2563EB',
-                    weight: 2.2,
-                    dashArray: '6 4',
-                    fillOpacity: 0.82,
-                }});
-                e.target.bringToFront();
-            }});
-            layer.on('mouseout', function(e) {{
-                geoLayer.resetStyle(e.target);
-            }});
-            layer.bindTooltip(
-                '<strong>' + feature.properties.name + '</strong><br>Permits: ' + feature.properties.permit_count,
-                {{ sticky: true }}
-            );
-        }},
-    }}).addTo(map);
-
-    map.fitBounds(bounds);
-}})();
-"""
-
-        return ui.tags.div(
-            ui.tags.div(
-                id="leaflet-nbhd-map",
-                style="height:420px; border-radius:8px; overflow:hidden;",
-            ),
-            ui.tags.script(script),
-        )
+        await session.send_custom_message("update_nbhd_map", {
+            "data": {"type": "FeatureCollection", "features": features_out},
+            "bounds": INITIAL_MAP_BOUNDS,
+            "tick_labels": tick_labels,
+        })
 
     @reactive.effect
     @reactive.event(input.map_click)
