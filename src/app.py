@@ -2,7 +2,7 @@ from datetime import date
 import copy
 import json
 from shiny import App, reactive, render, ui
-from shinywidgets import output_widget, render_widget, render_altair
+from shinywidgets import output_widget, render_widget, render_altair, reactive_read
 from faicons import icon_svg
 import pandas as pd
 import ipyleaflet
@@ -548,6 +548,11 @@ def server(input, output, session):
         if area in AREA_CHOICES:
             selected_area.set(area)
 
+    def apply_area_selection(area_name: str) -> None:
+        if area_name in AREA_CHOICES:
+            selected_area.set(area_name)
+            ui.update_selectize("area", selected=area_name)
+
     @reactive.calc
     def ai_df():
         return qc_vals.df()
@@ -776,7 +781,7 @@ def server(input, output, session):
 
         return chart
 
-    @render_widget
+    @render_altair
     def top_neighborhoods():
         df = filtered_df().copy()
         n = input.top_n()
@@ -789,6 +794,14 @@ def server(input, output, session):
             .sort_values('count', ascending=False)
         )
 
+        selected_bar = alt.selection_point(
+            name="selected_bar",
+            fields=[AREA],
+            on="click",
+            clear=False,
+            empty=False,
+        )
+
         chart = (
             alt.Chart(top)
             .mark_bar()
@@ -796,13 +809,35 @@ def server(input, output, session):
                 x=alt.X('count:Q', title='Permit Count'),
                 y=alt.Y('GeoLocalArea:N', sort='-x', title='Neighborhood',
                         axis=alt.Axis(titleFontWeight='bold')),
+                color=alt.condition(
+                    selected_bar,
+                    alt.value("#6C5CE7"),
+                    alt.value("#C8BFF7"),
+                ),
                 tooltip=['GeoLocalArea', 'count']
             )
+            .add_params(selected_bar)
             .properties(background="transparent")
             .configure_view(strokeWidth=0, fill="transparent")
-            .configure_mark(color="#6C5CE7")
         )
         return chart
+
+    @reactive.effect
+    def _sync_top_neighborhood_click():
+        selection = reactive_read(top_neighborhoods.widget.selections, "selected_bar")
+        area_name = None
+
+        if isinstance(selection, dict):
+            area_name = selection.get(AREA)
+            if isinstance(area_name, list) and area_name:
+                area_name = area_name[0]
+        elif isinstance(selection, list) and selection:
+            first = selection[0]
+            if isinstance(first, dict):
+                area_name = first.get(AREA)
+
+        if isinstance(area_name, str) and area_name in AREA_CHOICES:
+            apply_area_selection(area_name)
 
     @reactive.calc
     def map_df():
@@ -877,11 +912,11 @@ def server(input, output, session):
                 "fillOpacity": 0.35,
             },
             hover_style={
-                "color": "#1D4ED8",
-                "weight": 2.0,
+                "color": "#2563EB",
+                "weight": 2.2,
                 "dashArray": "6 4",
-                "fillColor": "#3B82F6",
-                "fillOpacity": 0.65,
+                "fillColor": "#60A5FA",
+                "fillOpacity": 0.45,
             },
         )
         m.add(geo_layer)
@@ -900,18 +935,18 @@ def server(input, output, session):
                 selected_layer = ipyleaflet.GeoJSON(
                     data={"type": "FeatureCollection", "features": [selected_feature]},
                     style={
-                        "color": "#1D4ED8",
-                        "weight": 4,
+                        "color": "#C2410C",
+                        "weight": 4.5,
                         "dashArray": "2 0",
-                        "fillColor": "#DBEAFE",
-                        "fillOpacity": 0.0,
+                        "fillColor": "#F59E0B",
+                        "fillOpacity": 0.14,
                     },
                     hover_style={
-                        "color": "#1D4ED8",
-                        "weight": 4,
+                        "color": "#9A3412",
+                        "weight": 5,
                         "dashArray": "2 0",
-                        "fillColor": "#3B82F6",
-                        "fillOpacity": 0.65,
+                        "fillColor": "#F59E0B",
+                        "fillOpacity": 0.22,
                     },
                 )
                 m.add(selected_layer)
@@ -948,10 +983,20 @@ def server(input, output, session):
             if kwargs.get("type") in ("mouseout", "mouseleave"):
                 hide_hover_info()
 
+        def select_area_from_map(**kwargs):
+            props = kwargs.get("properties") or {}
+            area_name = props.get("name")
+            if isinstance(area_name, str):
+                apply_area_selection(area_name)
+
         if hasattr(geo_layer, "on_hover"):
             geo_layer.on_hover(update_hover_info)
+        if hasattr(geo_layer, "on_click"):
+            geo_layer.on_click(select_area_from_map)
         if selected_layer is not None and hasattr(selected_layer, "on_hover"):
             selected_layer.on_hover(update_hover_info)
+        if selected_layer is not None and hasattr(selected_layer, "on_click"):
+            selected_layer.on_click(select_area_from_map)
         if hasattr(m, "on_interaction"):
             m.on_interaction(clear_on_mouseout)
 
