@@ -1,12 +1,9 @@
 from datetime import date
-import copy
 import json
 from shiny import App, reactive, render, ui
 from shinywidgets import output_widget, render_widget, render_altair, reactive_read
 from faicons import icon_svg
 import pandas as pd
-import ipyleaflet
-from ipywidgets import HTML
 import altair as alt
 import chatlas as clt
 import os
@@ -68,10 +65,6 @@ TYPE_CHOICES = sorted(
 
 MAP_HEAT_COLORS = ["#F5F3FF", "#DDD6FE", "#A78BFA", "#7C3AED", "#5B21B6"]
 MAP_HEAT_CMAP = LinearSegmentedColormap.from_list("permit_heat", MAP_HEAT_COLORS)
-IPYLEAFLET_TOOLTIP = getattr(ipyleaflet, "Tooltip", None)
-if IPYLEAFLET_TOOLTIP is None:
-    leaflet_module = getattr(ipyleaflet, "leaflet", None)
-    IPYLEAFLET_TOOLTIP = getattr(leaflet_module, "Tooltip", None)
 
 
 def heat_fill_color(count, max_count):
@@ -102,11 +95,142 @@ def format_legend_tick(value):
     return f"{value:.1f}"
 
 
+def geometry_bounds(geometry):
+    min_lat, min_lon = 90.0, 180.0
+    max_lat, max_lon = -90.0, -180.0
+
+    def walk(coords):
+        nonlocal min_lat, min_lon, max_lat, max_lon
+        if not coords:
+            return
+        if isinstance(coords[0], (int, float)) and len(coords) >= 2:
+            lon, lat = float(coords[0]), float(coords[1])
+            min_lat = min(min_lat, lat)
+            max_lat = max(max_lat, lat)
+            min_lon = min(min_lon, lon)
+            max_lon = max(max_lon, lon)
+            return
+        for item in coords:
+            walk(item)
+
+    walk(geometry.get("coordinates", []))
+    return min_lat, min_lon, max_lat, max_lon
+
+
+def padded_bounds(features, lat_pad_ratio=0.10, lon_pad_ratio=0.10, min_pad=0.01):
+    south, west = 90.0, 180.0
+    north, east = -90.0, -180.0
+
+    for feature in features:
+        min_lat, min_lon, max_lat, max_lon = geometry_bounds(feature["geometry"])
+        south = min(south, min_lat)
+        west = min(west, min_lon)
+        north = max(north, max_lat)
+        east = max(east, max_lon)
+
+    lat_pad = max(min_pad, (north - south) * lat_pad_ratio)
+    lon_pad = max(min_pad, (east - west) * lon_pad_ratio)
+
+    return [
+        (south - lat_pad, west - lon_pad),
+        (north + lat_pad, east + lon_pad),
+    ]
+
+
+INITIAL_MAP_BOUNDS = padded_bounds(
+    neighbourhood_geojson["features"],
+    lat_pad_ratio=0.12,
+    lon_pad_ratio=0.12,
+    min_pad=0.012,
+)
+
+
 app_ui = ui.page_fluid(
+    ui.busy_indicators.use(spinners=False),
     ui.tags.link(
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap",
         rel="stylesheet",
     ),
+    ui.tags.link(
+        rel="stylesheet",
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
+    ),
+    ui.tags.script(src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"),
+    ui.tags.script("""
+(function() {
+    var _map = null, _geoLayer = null, _legend = null;
+
+    Shiny.addCustomMessageHandler('update_nbhd_map', function(msg) {
+        var container = document.getElementById('leaflet-nbhd-map');
+        if (!container) return;
+
+        if (!_map) {
+            _map = L.map(container, {
+                zoomControl: false,
+                scrollWheelZoom: false,
+                doubleClickZoom: false,
+                zoomDelta: 0.5,
+                zoomSnap: 0.5,
+            });
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 19,
+            }).addTo(_map);
+            L.control.zoom({ position: 'bottomleft' }).addTo(_map);
+            _map.fitBounds(msg.bounds);
+        }
+
+        if (_geoLayer) _map.removeLayer(_geoLayer);
+        _geoLayer = L.geoJSON(msg.data, {
+            style: function(feature) {
+                if (feature.properties.isSelected) {
+                    return { color: '#7C3AED', weight: 4, dashArray: '10 4',
+                             fillColor: feature.properties.fillColor,
+                             fillOpacity: feature.properties.fillOpacity };
+                }
+                return { color: '#4B5563', weight: 1.2, dashArray: '6 4',
+                         fillColor: feature.properties.fillColor,
+                         fillOpacity: feature.properties.fillOpacity };
+            },
+            onEachFeature: function(feature, layer) {
+                layer.on('click', function() {
+                    Shiny.setInputValue('map_click', feature.properties.name, { priority: 'event' });
+                });
+                layer.on('mouseover', function(e) {
+                    e.target.setStyle({ color: '#2563EB', weight: 2.2, dashArray: '6 4', fillOpacity: 0.82 });
+                    e.target.bringToFront();
+                });
+                layer.on('mouseout', function(e) { _geoLayer.resetStyle(e.target); });
+                layer.bindTooltip(
+                    '<strong>' + feature.properties.name + '</strong><br>Permits: ' + feature.properties.permit_count,
+                    { sticky: true }
+                );
+            },
+        }).addTo(_map);
+
+        if (_legend) _map.removeControl(_legend);
+        _legend = L.control({ position: 'bottomright' });
+        _legend.onAdd = function() {
+            var div = L.DomUtil.create('div');
+            div.style.cssText = 'background:#fff;border-radius:8px;padding:8px 10px;box-shadow:0 1px 5px rgba(0,0,0,0.15);font-family:Inter,sans-serif;font-size:0.72rem;color:#2D3436;min-width:54px;';
+            var lbl = msg.tick_labels;
+            div.innerHTML =
+                '<div style="font-weight:700;font-size:0.73rem;color:#6C5CE7;margin-bottom:6px;text-align:center;">Permit Count</div>' +
+                '<div style="display:flex;align-items:stretch;gap:6px;">' +
+                    '<div style="width:14px;height:160px;border-radius:3px;background:linear-gradient(to bottom,#5B21B6,#7C3AED,#A78BFA,#DDD6FE,#F5F3FF);flex-shrink:0;"></div>' +
+                    '<div style="display:flex;flex-direction:column;justify-content:space-between;height:160px;line-height:1;">' +
+                        '<span>' + lbl[0] + '</span><span>' + lbl[1] + '</span><span>' + lbl[2] + '</span>' +
+                        '<span>' + lbl[3] + '</span><span>' + lbl[4] + '</span>' +
+                    '</div>' +
+                '</div>';
+            L.DomEvent.disableClickPropagation(div);
+            return div;
+        };
+        _legend.addTo(_map);
+    });
+})();
+"""),
     ui.tags.style(
         """
         :root {
@@ -245,6 +369,7 @@ app_ui = ui.page_fluid(
           border-radius: var(--radius);
           box-shadow: var(--shadow-sm);
           min-height: auto !important;
+          overflow: hidden !important;
           transition: box-shadow 0.2s, transform 0.2s;
           border: none;
           overflow: hidden;
@@ -275,6 +400,7 @@ app_ui = ui.page_fluid(
           font-size: 1.15rem;
           font-weight: 800;
           line-height: 1.1;
+          min-height: 1.27rem;
         }
         .bslib-value-box .value-box-showcase {
           opacity: 0.25;
@@ -340,12 +466,8 @@ app_ui = ui.page_fluid(
         .irs--shiny .irs-from, .irs--shiny .irs-to, .irs--shiny .irs-single { background: var(--accent); }
 
         /* Map */
-        #neighbourhood_map {
-          min-height: 420px;
-          display: block;
-          border-radius: 8px;
-          overflow: hidden;
-        }
+        .leaflet-interactive:focus { outline: none; }
+        #leaflet-nbhd-map { border-radius: 8px; overflow: hidden; }
 
         /* Footer */
         .app-footer {
@@ -462,7 +584,21 @@ app_ui = ui.page_fluid(
                     open="desktop",
                     width=280,
                 ),
-                ui.output_ui("empty_state_msg"),
+                ui.panel_conditional(
+                    "input.checkbox_group !== null && input.checkbox_group.length === 0",
+                    ui.tags.div(
+                        ui.tags.div(
+                            ui.tags.span("No filters selected", style="font-weight:700; font-size:1.1rem;"),
+                            ui.tags.br(),
+                            ui.tags.span(
+                                "Select at least one work type from the sidebar to view results.",
+                                style="opacity:0.7; font-size:0.9rem;",
+                            ),
+                            style="text-align:center; padding:32px 16px; color:var(--accent);",
+                        ),
+                        style="background:var(--accent-light); border:1px dashed var(--accent); border-radius:var(--radius); margin-bottom:12px;",
+                    ),
+                ),
                 ui.layout_column_wrap(
             ui.value_box(
                 "Permits Issued",
@@ -493,7 +629,7 @@ app_ui = ui.page_fluid(
                 ui.layout_columns(
             ui.card(
                 ui.card_header("Neighbourhood Permit Map"),
-                output_widget("neighbourhood_map"),
+                ui.tags.div(id="leaflet-nbhd-map", style="height:420px;"),
                 full_screen=True,
             ),
             ui.card(
@@ -762,24 +898,6 @@ def server(input, output, session):
 
         return f"{days_taken_to_issue.mean():.1f} Days"
 
-    @render.ui
-    def empty_state_msg():
-        types = list(input.checkbox_group())
-        if len(types) == 0:
-            return ui.tags.div(
-                ui.tags.div(
-                    ui.tags.span("No filters selected", style="font-weight:700; font-size:1.1rem;"),
-                    ui.tags.br(),
-                    ui.tags.span(
-                        "Select at least one work type from the sidebar to view results.",
-                        style="opacity:0.7; font-size:0.9rem;",
-                    ),
-                    style="text-align:center; padding:32px 16px; color:var(--accent);",
-                ),
-                style="background:var(--accent-light); border:1px dashed var(--accent); border-radius:var(--radius); margin-bottom:12px;",
-            )
-        return None
-
     @render_altair
     def permit_volume_trend():
         df = filtered_df().copy()
@@ -923,248 +1041,48 @@ def server(input, output, session):
 
         return grouped
 
-    @render_widget
-    def neighbourhood_map():
+    @reactive.effect
+    async def _update_neighbourhood_map():
         df = map_df()
         active_area = selected_area.get()
-
-        center = (49.26, -123.12)
-        m = ipyleaflet.Map(
-            center=center,
-            zoom=12,
-            layout={'height': '420px'},
-            basemap=ipyleaflet.basemaps.CartoDB.Positron,
-            zoom_control=False,
-            zoom_delta=0.5,
-            zoom_snap=0.5,
-            scroll_wheel_zoom=False,
-            touch_zoom=True,
-            double_click_zoom=False,
-        )
-        m.add(ipyleaflet.ZoomControl(position="bottomleft"))
 
         counts = dict(zip(df[AREA], df["permit_count"])) if not df.empty else {}
         max_count = int(df["permit_count"].max()) if not df.empty else 0
 
-        geojson_data = copy.deepcopy(neighbourhood_geojson)
-        for feature in geojson_data["features"]:
+        features_out = []
+        for feature in neighbourhood_geojson["features"]:
             area_name = feature["properties"]["name"]
             count = int(counts.get(area_name, 0))
-            feature["properties"]["permit_count"] = count
+            features_out.append({
+                "type": "Feature",
+                "geometry": feature["geometry"],
+                "properties": {
+                    "name": area_name,
+                    "permit_count": count,
+                    "fillColor": heat_fill_color(count, max_count),
+                    "fillOpacity": 0.72 if count > 0 else 0.28,
+                    "isSelected": area_name == active_area,
+                },
+            })
 
-        def feature_style(feature):
-            count = int(feature["properties"].get("permit_count", 0))
-            return {
-                "color": "#4B5563",
-                "weight": 1.2,
-                "dashArray": "6 4",
-                "fillColor": heat_fill_color(count, max_count),
-                "fillOpacity": 0.72 if count > 0 else 0.28,
-            }
+        tick_values = [max_count, max_count * 3 // 4, max_count // 2, max_count // 4, 0]
+        tick_labels = [format_legend_tick(float(v)) for v in tick_values]
 
-        def geometry_bounds(geometry):
-            min_lat, min_lon = 90.0, 180.0
-            max_lat, max_lon = -90.0, -180.0
+        await session.send_custom_message("update_nbhd_map", {
+            "data": {"type": "FeatureCollection", "features": features_out},
+            "bounds": INITIAL_MAP_BOUNDS,
+            "tick_labels": tick_labels,
+        })
 
-            def walk(coords):
-                nonlocal min_lat, min_lon, max_lat, max_lon
-                if not coords:
-                    return
-                if isinstance(coords[0], (int, float)) and len(coords) >= 2:
-                    lon, lat = float(coords[0]), float(coords[1])
-                    min_lat = min(min_lat, lat)
-                    max_lat = max(max_lat, lat)
-                    min_lon = min(min_lon, lon)
-                    max_lon = max(max_lon, lon)
-                    return
-                for item in coords:
-                    walk(item)
-
-            walk(geometry.get("coordinates", []))
-            return min_lat, min_lon, max_lat, max_lon
-
-        geo_layer = ipyleaflet.GeoJSON(
-            data=geojson_data,
-            style_callback=feature_style,
-            hover_style={
-                "color": "#2563EB",
-                "weight": 2.2,
-                "dashArray": "6 4",
-                "fillOpacity": 0.82,
-            },
-        )
-        m.add(geo_layer)
-
-        selected_layer = None
-        # Strong, persistent border highlight for selected neighbourhood.
-        if active_area != "All":
-            selected_feature = next(
-                (
-                    feature for feature in geojson_data["features"]
-                    if feature["properties"]["name"] == active_area
-                ),
-                None,
-            )
-            if selected_feature is not None:
-                selected_layer = ipyleaflet.GeoJSON(
-                    data={"type": "FeatureCollection", "features": [selected_feature]},
-                    style={
-                        "color": "#7C3AED",
-                        "weight": 4,
-                        "dashArray": "10 4",
-                        "dashOffset": "0",
-                        "className": "selected-neighbourhood-path",
-                        "fillOpacity": 0,
-                    },
-                    hover_style={
-                        "color": "#6D28D9",
-                        "weight": 4,
-                        "dashArray": "10 4",
-                        "dashOffset": "0",
-                        "className": "selected-neighbourhood-path",
-                        "fillOpacity": 0.06,
-                    },
-                )
-                m.add(selected_layer)
-
-        # Neighbourhood features currently visible after filtering.
-        selected_areas = set(df[AREA].tolist()) if not df.empty else set()
-        relevant_features = [
-            f for f in geojson_data["features"]
-            if not selected_areas or f["properties"]["name"] in selected_areas
-        ]
-
-        tick_values = list(reversed(legend_ticks(max_count)))
-        gradient_css = ", ".join(
-            f"{color} {round(index * 100 / (len(MAP_HEAT_COLORS) - 1), 1)}%"
-            for index, color in enumerate(reversed(MAP_HEAT_COLORS))
-        )
-        tick_labels_html = "".join(
-            f"<span>{format_legend_tick(value)}</span>"
-            for value in tick_values
-        )
-        legend_info = HTML(
-            value=(
-                "<div style='height:392px;background:rgba(255,255,255,0.96);padding:6px 4px;"
-                "border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,0.08);"
-                "font-size:11px;line-height:1.1;display:flex;flex-direction:column;"
-                "align-items:center;justify-content:space-between;min-width:0;'>"
-                "<b style='font-size:11px;'>Permit count</b>"
-                "<div style='flex:1;display:flex;align-items:stretch;gap:4px;margin-top:3px;'>"
-                "<div style='width:12px;flex:1;border-radius:999px;"
-                f"background:linear-gradient(180deg, {gradient_css});"
-                "border:1px solid rgba(91,33,182,0.16);'></div>"
-                "<div style='height:100%;display:flex;flex-direction:column;"
-                "justify-content:space-between;color:#4B5563;white-space:nowrap;"
-                "font-size:10px;'>"
-                f"{tick_labels_html}"
-                "</div>"
-                "</div>"
-                "</div>"
-            )
-        )
-        legend_control = ipyleaflet.WidgetControl(widget=legend_info, position="bottomright")
-        m.add(legend_control)
-
-        hover_info = HTML(value="")
-        hover_control = ipyleaflet.WidgetControl(widget=hover_info, position="topleft")
-        base_tooltip = None
-        selected_tooltip = None
-        if IPYLEAFLET_TOOLTIP is not None:
-            base_tooltip = IPYLEAFLET_TOOLTIP(
-                content="",
-                sticky=True,
-                direction="auto",
-                opacity=0.95,
-            )
-            geo_layer.tooltip = base_tooltip
-
-        def hide_hover_info():
-            if base_tooltip is not None:
-                base_tooltip.content = ""
-            else:
-                hover_info.value = ""
-                if hover_control in m.controls:
-                    m.remove(hover_control)
-            if selected_tooltip is not None:
-                selected_tooltip.content = ""
-
-        def update_hover_info(**kwargs):
-            props = kwargs.get("properties") or {}
-            name = props.get("name")
-            count = props.get("permit_count", 0)
-
-            if not name:
-                hide_hover_info()
-                return
-
-            tooltip_html = f"<b>{name}</b><br>Permits: {count:,}"
-            if base_tooltip is not None:
-                base_tooltip.content = tooltip_html
-            else:
-                hover_info.value = tooltip_html
-                if hover_control not in m.controls:
-                    m.add(hover_control)
-            if selected_tooltip is not None:
-                selected_tooltip.content = tooltip_html
-
-        def clear_on_mouseout(**kwargs):
-            if kwargs.get("type") in ("mouseout", "mouseleave"):
-                hide_hover_info()
-
-        def select_area_from_map(**kwargs):
-            props = kwargs.get("properties") or {}
-            area_name = props.get("name")
-            if isinstance(area_name, str):
-                apply_area_selection(area_name)
-
-        if hasattr(geo_layer, "on_hover"):
-            geo_layer.on_hover(update_hover_info)
-        if hasattr(geo_layer, "on_click"):
-            geo_layer.on_click(select_area_from_map)
-        if selected_layer is not None and hasattr(selected_layer, "on_hover"):
-            if IPYLEAFLET_TOOLTIP is not None:
-                selected_tooltip = IPYLEAFLET_TOOLTIP(
-                    content="",
-                    sticky=True,
-                    direction="auto",
-                    opacity=0.95,
-                )
-                selected_layer.tooltip = selected_tooltip
-            selected_layer.on_hover(update_hover_info)
-        if selected_layer is not None and hasattr(selected_layer, "on_click"):
-            selected_layer.on_click(select_area_from_map)
-        if hasattr(m, "on_interaction"):
-            m.on_interaction(clear_on_mouseout)
-
-        # Auto-zoom so all filtered/selected neighbourhoods are visible.
-        if relevant_features:
-            south, west = 90.0, 180.0
-            north, east = -90.0, -180.0
-            for feature in relevant_features:
-                min_lat, min_lon, max_lat, max_lon = geometry_bounds(feature["geometry"])
-                south = min(south, min_lat)
-                west = min(west, min_lon)
-                north = max(north, max_lat)
-                east = max(east, max_lon)
-            if active_area == "All":
-                lat_pad = max(0.002, (north - south) * 0.05)
-                lon_pad = max(0.002, (east - west) * 0.05)
-            else:
-                # Keep a wider local context when a single neighbourhood is selected.
-                lat_pad = max(0.02, (north - south) * 0.50)
-                lon_pad = max(0.02, (east - west) * 0.50)
-            padded_south = south - lat_pad
-            padded_west = west - lon_pad
-            padded_north = north + lat_pad
-            padded_east = east + lon_pad
-
-            m.fit_bounds([
-                (padded_south, padded_west),
-                (padded_north, padded_east),
-            ])
-
-        return m
+    @reactive.effect
+    @reactive.event(input.map_click)
+    def _sync_map_click():
+        try:
+            area_name = input.map_click()
+        except Exception:
+            return
+        if isinstance(area_name, str) and area_name in AREA_CHOICES:
+            apply_area_selection(area_name)
 
 
 app = App(app_ui, server)
