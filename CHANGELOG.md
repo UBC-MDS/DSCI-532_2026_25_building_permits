@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.4.0] - 2026-03-17
+
+### Added
+
+- Interactive cross-filtering: clicking a neighbourhood on the map or the top neighbourhoods bar chart filters the other views (PR #90)
+- Heatmap coloring on neighbourhood map polygons to show relative permit counts, with a colour legend (PR #91)
+- Tooltip on the Permit Volume Over Time chart showing month and permit count on hover (PR #86)
+- "No filters selected" empty state banner when all work type checkboxes are unchecked (PR #87)
+- Lazy loading with Ibis and DuckDB for faster dashboard filter performance; data converted to Parquet format (PRs #81, #83)
+- Playwright end-to-end tests for the app (PR #94)
+- Unit tests for refactored utility functions with pytest (PR #95)
+- Testing instructions added to README
+
+### Changed
+
+- Neighbourhood map rebuilt from ipyleaflet to pure Leaflet.js for better rendering and heatmap support (PR #91, #92)
+- Value box cards made significantly more compact: reduced min-height, font sizes, icon sizes, and padding; text centered across full card width (PR #85)
+- X-axis labels on Permit Volume Over Time chart fixed to show years (monthly when time range is short) instead of April/October (PR #88)
+- Refactored `get_unique_sorted` and `compute_avg_days` into `src/utils.py` for better code organization (PR #95)
+- Updated `reports/m2_spec.md` to include advanced feature documentation (PR #90)
+
+### Fixed
+
+- Value boxes were inflated to 240px by a general card CSS rule; overridden with `min-height: auto` for value boxes only (PR #85)
+- X-axis labelling bug showing month names instead of years on the permit volume chart (PR #88)
+- Blank map issue resolved with adjusted zoom and positioning (PR #92)
+- Utils import path fix (PR #96)
+
+### Reflection
+
+Milestone 4 focused on addressing instructor and peer feedback, improving code quality, and adding an advanced interactive feature. The two critical visual bugs (value card height and x-axis labelling) were resolved first. The map was rebuilt from ipyleaflet to pure Leaflet.js to support heatmap polygon coloring, which was a significant refactor but resulted in better geographic visualization. The advanced feature (cross-filtering between the map and bar chart via click events) adds a coordinated view interaction pattern that was not in the original plan but improves the exploratory workflow. On the engineering side, the data loading was migrated to Ibis + DuckDB with Parquet files for better performance, utility functions were extracted and tested, and Playwright end-to-end tests were added to catch regressions. Non-critical feedback items addressed include the permit volume tooltip and the empty state message for cleared filters. Remaining non-critical items (N1 summary text, N2/N3 AI tab layout, N6 multi-select, N7 hover tooltips) were deprioritized in favour of the testing and advanced feature requirements.
+
 ## [0.3.0] - 2026-02-12
 
 ### Added

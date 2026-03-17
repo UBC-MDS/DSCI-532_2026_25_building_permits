@@ -86,6 +86,13 @@ DSCI-532_2026_25_building_permits/
 └── team.txt
 ```
 
+## 4. Run the tests
+
+```bash
+playwright install
+pytest tests/
+```
+
 ## Contributing
 
 Contributors are expected to follow the guidelines outlined in **[CONTRIBUTING.md](./CONTRIBUTING.md)**. Please review this document before submitting issues or pull requests.

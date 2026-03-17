@@ -1,17 +1,21 @@
 from datetime import date
-import copy
 import json
 from shiny import App, reactive, render, ui
-from shinywidgets import output_widget, render_widget, render_altair
+from shinywidgets import output_widget, render_widget, render_altair, reactive_read
 from faicons import icon_svg
 import pandas as pd
-import ipyleaflet
-from ipywidgets import HTML
 import altair as alt
 import chatlas as clt
 import os
+from matplotlib.colors import LinearSegmentedColormap, to_hex
 from querychat import QueryChat
 from dotenv import load_dotenv
+import ibis 
+from ibis import _ # _ is a shortcut for referencing columns in an ibis table expression without typing table name. ex) permits.filter(_.project_value < 10000) compared to permits.filter(permits.project_value < 10000)
+import sys
+sys.path.insert(0, os.path.dirname(__file__))
+
+from utils import get_unique_sorted, compute_avg_days
 
 load_dotenv()
 
@@ -23,10 +27,7 @@ APPLIED_DATE = 'PermitNumberCreatedDate'
 AREA = 'GeoLocalArea'
 PERMIT_TYPE = 'TypeOfWork'
 
-# Read in the data
-permits_df = pd.read_csv('data/raw/issued-building-permits.csv',
-                         sep=';',
-                         encoding='utf-8')
+permits_df = pd.read_parquet("data/processed/issued-building-permits.parquet")
 
 with open('data/raw/local-area-boundary.geojson', encoding='utf-8') as f:
     neighbourhood_geojson = json.load(f)
@@ -48,30 +49,181 @@ EARLIEST_ISSUE_DATE = permits_df[ISSUE_DATE].min().date()
 LATEST_ISSUE_DATE = permits_df[ISSUE_DATE].max().date()
 
 # Find the unique areas/neighbourhoods from the data
-areas = sorted(
-    permits_df[AREA]
-    .dropna()
-    .astype(str)
-    .unique()
-)
+areas = get_unique_sorted(permits_df[AREA])
 
 AREA_CHOICES = ['All'] + areas
 
 # Find the unique permit types to pass in to the sidebar filter below
-TYPE_CHOICES = sorted(
-    permits_df[PERMIT_TYPE]
-    .dropna()
-    .astype(str)
-    .str.strip()
-    .unique()
+TYPE_CHOICES = get_unique_sorted(permits_df[PERMIT_TYPE])
+
+MAP_HEAT_COLORS = ["#F5F3FF", "#DDD6FE", "#A78BFA", "#7C3AED", "#5B21B6"]
+MAP_HEAT_CMAP = LinearSegmentedColormap.from_list("permit_heat", MAP_HEAT_COLORS)
+
+
+def heat_fill_color(count, max_count):
+    if max_count <= 0:
+        return "#E5E7EB"
+    scale_value = min(max(count / max_count, 0.0), 1.0)
+    return to_hex(MAP_HEAT_CMAP(scale_value))
+
+
+def legend_ticks(max_count):
+    if max_count <= 0:
+        return [0] * 10
+    return [round(max_count * step / 9) for step in range(10)]
+
+
+def format_legend_tick(value):
+    value = float(value)
+    abs_value = abs(value)
+
+    if abs_value >= 1000:
+        compact = value / 1000
+        if float(compact).is_integer():
+            return f"{int(compact)}k"
+        return f"{compact:.1f}k"
+
+    if value.is_integer():
+        return f"{int(value)}"
+    return f"{value:.1f}"
+
+
+def geometry_bounds(geometry):
+    min_lat, min_lon = 90.0, 180.0
+    max_lat, max_lon = -90.0, -180.0
+
+    def walk(coords):
+        nonlocal min_lat, min_lon, max_lat, max_lon
+        if not coords:
+            return
+        if isinstance(coords[0], (int, float)) and len(coords) >= 2:
+            lon, lat = float(coords[0]), float(coords[1])
+            min_lat = min(min_lat, lat)
+            max_lat = max(max_lat, lat)
+            min_lon = min(min_lon, lon)
+            max_lon = max(max_lon, lon)
+            return
+        for item in coords:
+            walk(item)
+
+    walk(geometry.get("coordinates", []))
+    return min_lat, min_lon, max_lat, max_lon
+
+
+def padded_bounds(features, lat_pad_ratio=0.10, lon_pad_ratio=0.10, min_pad=0.01):
+    south, west = 90.0, 180.0
+    north, east = -90.0, -180.0
+
+    for feature in features:
+        min_lat, min_lon, max_lat, max_lon = geometry_bounds(feature["geometry"])
+        south = min(south, min_lat)
+        west = min(west, min_lon)
+        north = max(north, max_lat)
+        east = max(east, max_lon)
+
+    lat_pad = max(min_pad, (north - south) * lat_pad_ratio)
+    lon_pad = max(min_pad, (east - west) * lon_pad_ratio)
+
+    return [
+        (south - lat_pad, west - lon_pad),
+        (north + lat_pad, east + lon_pad),
+    ]
+
+
+INITIAL_MAP_BOUNDS = padded_bounds(
+    neighbourhood_geojson["features"],
+    lat_pad_ratio=0.12,
+    lon_pad_ratio=0.12,
+    min_pad=0.012,
 )
 
 
 app_ui = ui.page_fluid(
+    ui.busy_indicators.use(spinners=False),
     ui.tags.link(
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap",
         rel="stylesheet",
     ),
+    ui.tags.link(
+        rel="stylesheet",
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
+    ),
+    ui.tags.script(src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"),
+    ui.tags.script("""
+(function() {
+    var _map = null, _geoLayer = null, _legend = null;
+
+    Shiny.addCustomMessageHandler('update_nbhd_map', function(msg) {
+        var container = document.getElementById('leaflet-nbhd-map');
+        if (!container) return;
+
+        if (!_map) {
+            _map = L.map(container, {
+                zoomControl: false,
+                scrollWheelZoom: false,
+                doubleClickZoom: false,
+                zoomDelta: 0.5,
+                zoomSnap: 0.5,
+            });
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 19,
+            }).addTo(_map);
+            L.control.zoom({ position: 'bottomleft' }).addTo(_map);
+            _map.fitBounds(msg.bounds);
+        }
+
+        if (_geoLayer) _map.removeLayer(_geoLayer);
+        _geoLayer = L.geoJSON(msg.data, {
+            style: function(feature) {
+                if (feature.properties.isSelected) {
+                    return { color: '#7C3AED', weight: 4, dashArray: '10 4',
+                             fillColor: feature.properties.fillColor,
+                             fillOpacity: feature.properties.fillOpacity };
+                }
+                return { color: '#4B5563', weight: 1.2, dashArray: '6 4',
+                         fillColor: feature.properties.fillColor,
+                         fillOpacity: feature.properties.fillOpacity };
+            },
+            onEachFeature: function(feature, layer) {
+                layer.on('click', function() {
+                    Shiny.setInputValue('map_click', feature.properties.name, { priority: 'event' });
+                });
+                layer.on('mouseover', function(e) {
+                    e.target.setStyle({ color: '#2563EB', weight: 2.2, dashArray: '6 4', fillOpacity: 0.82 });
+                    e.target.bringToFront();
+                });
+                layer.on('mouseout', function(e) { _geoLayer.resetStyle(e.target); });
+                layer.bindTooltip(
+                    '<strong>' + feature.properties.name + '</strong><br>Permits: ' + feature.properties.permit_count,
+                    { sticky: true }
+                );
+            },
+        }).addTo(_map);
+
+        if (_legend) _map.removeControl(_legend);
+        _legend = L.control({ position: 'bottomright' });
+        _legend.onAdd = function() {
+            var div = L.DomUtil.create('div');
+            div.style.cssText = 'background:#fff;border-radius:8px;padding:8px 10px;box-shadow:0 1px 5px rgba(0,0,0,0.15);font-family:Inter,sans-serif;font-size:0.72rem;color:#2D3436;min-width:54px;';
+            var lbl = msg.tick_labels;
+            div.innerHTML =
+                '<div style="font-weight:700;font-size:0.73rem;color:#6C5CE7;margin-bottom:6px;text-align:center;">Permit Count</div>' +
+                '<div style="display:flex;align-items:stretch;gap:6px;">' +
+                    '<div style="width:14px;height:160px;border-radius:3px;background:linear-gradient(to bottom,#5B21B6,#7C3AED,#A78BFA,#DDD6FE,#F5F3FF);flex-shrink:0;"></div>' +
+                    '<div style="display:flex;flex-direction:column;justify-content:space-between;height:160px;line-height:1;">' +
+                        '<span>' + lbl[0] + '</span><span>' + lbl[1] + '</span><span>' + lbl[2] + '</span>' +
+                        '<span>' + lbl[3] + '</span><span>' + lbl[4] + '</span>' +
+                    '</div>' +
+                '</div>';
+            L.DomEvent.disableClickPropagation(div);
+            return div;
+        };
+        _legend.addTo(_map);
+    });
+})();
+"""),
     ui.tags.style(
         """
         :root {
@@ -179,6 +331,14 @@ app_ui = ui.page_fluid(
           padding-bottom: 8px;
         }
 
+        @keyframes selected-neighbourhood-dash {
+          to { stroke-dashoffset: -28; }
+        }
+
+        .selected-neighbourhood-path {
+          animation: selected-neighbourhood-dash 1.2s linear infinite;
+        }
+
         .btn.btn-default, .btn.btn-primary {
           width: 100%;
           background: linear-gradient(135deg, #6C5CE7, #5A4BD1);
@@ -197,32 +357,65 @@ app_ui = ui.page_fluid(
           box-shadow: 0 4px 14px rgba(108, 92, 231, 0.35);
         }
 
-        /* Value boxes */
+        /* Value boxes – compact */
         .bslib-value-box {
           border-radius: var(--radius);
           box-shadow: var(--shadow-sm);
-          min-height: 110px;
+          min-height: auto !important;
+          overflow: hidden !important;
           transition: box-shadow 0.2s, transform 0.2s;
           border: none;
+          overflow: hidden;
+        }
+        .bslib-value-box .card-body {
+          padding: 6px 12px !important;
+        }
+        .bslib-value-box .value-box-grid {
+          --bslib-grid-height: auto !important;
+          --bslib-grid-height-mobile: auto !important;
+          min-height: 0 !important;
+          display: block !important;
+          position: relative;
         }
         .bslib-value-box:hover {
           box-shadow: var(--shadow-md);
           transform: translateY(-2px);
         }
         .bslib-value-box .value-box-title {
-          font-size: 0.76rem;
+          font-size: 0.62rem;
           font-weight: 600;
           text-transform: uppercase;
           letter-spacing: 0.5px;
           opacity: 0.85;
+          margin-bottom: 0;
         }
         .bslib-value-box .value-box-value {
-          font-size: 1.85rem;
+          font-size: 1.15rem;
           font-weight: 800;
+          line-height: 1.1;
+          min-height: 1.27rem;
         }
         .bslib-value-box .value-box-showcase {
-          font-size: 2rem;
-          opacity: 0.2;
+          opacity: 0.25;
+          padding: 4px !important;
+          position: absolute;
+          left: 14px;
+          top: 50%;
+          transform: translateY(-50%);
+          z-index: 0;
+          width: auto !important;
+          max-width: none !important;
+        }
+        .bslib-value-box .value-box-area {
+          padding: 6px 8px !important;
+          min-height: 0 !important;
+          display: flex !important;
+          flex-direction: column !important;
+          justify-content: center !important;
+          text-align: center !important;
+          width: 100% !important;
+          position: relative;
+          z-index: 1;
         }
         .vb-purple {
           background: linear-gradient(135deg, #6C5CE7, #a855f7) !important;
@@ -255,6 +448,10 @@ app_ui = ui.page_fluid(
           min-height: 240px;
           padding: 16px;
         }
+        .card.bslib-card.bslib-value-box .card-body {
+          min-height: auto !important;
+          padding: 6px 12px !important;
+        }
 
         /* Slider */
         .irs--shiny .irs-bar { background: var(--accent); border-top-color: var(--accent); border-bottom-color: var(--accent); }
@@ -262,12 +459,8 @@ app_ui = ui.page_fluid(
         .irs--shiny .irs-from, .irs--shiny .irs-to, .irs--shiny .irs-single { background: var(--accent); }
 
         /* Map */
-        #neighbourhood_map {
-          min-height: 420px;
-          display: block;
-          border-radius: 8px;
-          overflow: hidden;
-        }
+        .leaflet-interactive:focus { outline: none; }
+        #leaflet-nbhd-map { border-radius: 8px; overflow: hidden; }
 
         /* Footer */
         .app-footer {
@@ -284,8 +477,7 @@ app_ui = ui.page_fluid(
             grid-template-columns: 1fr 1fr !important;
           }
           h2 { font-size: 1.35rem; margin: 14px 0 8px; }
-          .bslib-value-box .value-box-value { font-size: 1.4rem; }
-          .bslib-value-box { min-height: 100px; }
+          .bslib-value-box .value-box-value { font-size: 1.15rem; }
           .container-fluid { padding: 0 12px; }
           .card.bslib-card .card-body { min-height: 180px; }
           #neighbourhood_map { min-height: 320px; }
@@ -298,9 +490,8 @@ app_ui = ui.page_fluid(
         /* Mobile */
         @media (max-width: 576px) {
           h2 { font-size: 1.15rem; margin: 10px 0 6px; }
-          .bslib-value-box .value-box-value { font-size: 1.2rem; }
-          .bslib-value-box .value-box-title { font-size: 0.7rem; }
-          .bslib-value-box { min-height: 80px; }
+          .bslib-value-box .value-box-value { font-size: 0.95rem; }
+          .bslib-value-box .value-box-title { font-size: 0.6rem; }
           .container-fluid { padding: 0 8px; }
           .card.bslib-card .card-header { font-size: 0.82rem; padding: 10px 14px; }
           .card.bslib-card .card-body { min-height: 160px; padding: 10px; }
@@ -378,6 +569,7 @@ app_ui = ui.page_fluid(
                     }
                   }
                   bindAreaFocusClear();
+
                 });
                 """
             ),
@@ -385,18 +577,35 @@ app_ui = ui.page_fluid(
                     open="desktop",
                     width=280,
                 ),
+                ui.panel_conditional(
+                    "input.checkbox_group !== null && input.checkbox_group.length === 0",
+                    ui.tags.div(
+                        ui.tags.div(
+                            ui.tags.span("No filters selected", style="font-weight:700; font-size:1.1rem;"),
+                            ui.tags.br(),
+                            ui.tags.span(
+                                "Select at least one work type from the sidebar to view results.",
+                                style="opacity:0.7; font-size:0.9rem;",
+                            ),
+                            style="text-align:center; padding:32px 16px; color:var(--accent);",
+                        ),
+                        style="background:var(--accent-light); border:1px dashed var(--accent); border-radius:var(--radius); margin-bottom:12px;",
+                    ),
+                ),
                 ui.layout_column_wrap(
             ui.value_box(
                 "Permits Issued",
                 ui.output_text("permits_to_date"),
-                showcase=icon_svg("file-lines", width="40px"),
+                showcase=icon_svg("file-lines", width="22px"),
                 theme="primary",
+                showcase_layout="left center",
             ),
             ui.value_box(
                 "Avg Processing Time",
                 ui.output_text("avg_days"),
-                showcase=icon_svg("clock", width="40px"),
+                showcase=icon_svg("clock", width="22px"),
                 class_="vb-purple",
+                showcase_layout="left center",
             ),
             width=1/2,
             class_="kpi-wrap",
@@ -413,7 +622,7 @@ app_ui = ui.page_fluid(
                 ui.layout_columns(
             ui.card(
                 ui.card_header("Neighbourhood Permit Map"),
-                output_widget("neighbourhood_map"),
+                ui.tags.div(id="leaflet-nbhd-map", style="height:420px;"),
                 full_screen=True,
             ),
             ui.card(
@@ -471,16 +680,52 @@ app_ui = ui.page_fluid(
     ),
 )
 
-
 def server(input, output, session):
+    # connect to the data from the parquet file using ibis/DuckDB
+    conn = ibis.duckdb.connect()
+    permits = conn.read_parquet("data/processed/issued-building-permits.parquet")
+    session.on_ended(conn.disconnect)
     selected_area = reactive.Value("All")
     qc_vals = query_chat.server()
+
+    def get_time_axis(start, end):
+        '''
+        Formats the time axis as yearly if there is a wide date range (over 2 years)
+        Otherwise formats the time axis as month/yaer if the date range is shorter.
+        '''
+        start = pd.to_datetime(start)
+        end = pd.to_datetime(end)
+        days = (end - start).days
+
+        # if there is a wide date range, show years on axis
+        if days > 730:
+            return alt.Axis(
+                title = "Year",
+                format = "%Y",
+                tickCount = "year",
+                titleFontWeight = "bold",
+                labelAngle = 0
+            )
+        
+        # else return shorter date range 
+        return alt.Axis(
+            title="Month",
+            format="%b %Y",
+            tickCount=8,
+            titleFontWeight="bold",
+            labelAngle=0
+        )
 
     @reactive.effect
     def _sync_selected_area():
         area = input.area()
         if area in AREA_CHOICES:
             selected_area.set(area)
+
+    def apply_area_selection(area_name: str) -> None:
+        if area_name in AREA_CHOICES:
+            selected_area.set(area_name)
+            ui.update_selectize("area", selected=area_name)
 
     @reactive.calc
     def ai_df():
@@ -508,17 +753,37 @@ def server(input, output, session):
             df.groupby('month')
             .size()
             .reset_index(name='count')
+            .sort_values('month')
+        )
+
+        start = monthly["month"].min()
+        end = monthly["month"].max()
+
+        axis_config = get_time_axis(start, end)
+
+        base = alt.Chart(monthly).encode(
+            x=alt.X(
+                'month:T',
+                axis=axis_config
+            ),
+            y=alt.Y(
+                'count:Q', 
+                title='Count',
+                axis=alt.Axis(titleFontWeight='bold')
+            ),
+        )
+
+        line = base.mark_line(color="#6C5CE7", strokeWidth=2.5)
+
+        points = base.mark_point(color="#6C5CE7", size=30, opacity=0).encode(
+            tooltip=[
+                alt.Tooltip('month:T', title='Month', format='%b %Y'),
+                alt.Tooltip('count:Q', title='Permits'),
+            ]
         )
 
         chart = (
-            alt.Chart(monthly)
-            .mark_line(color="#6C5CE7", strokeWidth=2.5)
-            .encode(
-                x=alt.X('month:T', title='Year',
-                        axis=alt.Axis(titleFontWeight='bold')),
-                y=alt.Y('count:Q', title='Count',
-                        axis=alt.Axis(titleFontWeight='bold')),
-            )
+            (line + points)
             .properties(background="transparent")
             .configure_view(strokeWidth=0, fill="transparent")
         )
@@ -569,53 +834,52 @@ def server(input, output, session):
         selected_area.set("All")
         ui.update_selectize("area", selected="All")
         ui.update_slider("top_n", value=5)
-
+    
     @reactive.calc
-    def filtered_df():
-        df = permits_df.copy()
-
+    def filtered_expr():
         # Filter based on the inputted date
         start, end = input.date_range()
         start = pd.to_datetime(start)
         end = pd.to_datetime(end)
 
+        expr = permits
+
         # Filter for rows between the start and end date (mutually inclusive)
-        df = df[(df[ISSUE_DATE] >= start) & (df[ISSUE_DATE] <= end)]
+        expr = expr.filter(
+            _[ISSUE_DATE].between(start, end)
+        )
 
         # Filter the df so it only contains the permit types checked off
         types = list(input.checkbox_group())
 
         # If the user clears all work types manually, show no matching rows.
         if len(types) == 0:
-            return df.iloc[0:0]
+            expr = expr.filter(
+                _[PERMIT_TYPE].isin([])
+            )
+            return expr
 
-        df = df[df[PERMIT_TYPE].isin(types)]
+        expr = expr.filter(_[PERMIT_TYPE].isin(types))
 
         # Filter based on selected neighbourhood from searchable dropdown.
         area = selected_area.get()
         if area != "All":
-            df = df[df[AREA] == area]
+            expr = expr.filter(_[AREA] == area)
 
-        return df
+        return expr
+    
+    @reactive.calc
+    def filtered_df():
+        return filtered_expr().execute()
 
     @render.text
     def permits_to_date():
         # Count of permits based on selected filters/filtered_df
-        return f"{len(filtered_df()):,}"
+        return f"{filtered_expr().count().execute():,}"
 
     @render.text
     def avg_days():
-        df = filtered_df()
-        if df.empty:
-            return "0 Days"
-        
-        applied_date = pd.to_datetime(df[APPLIED_DATE], errors="coerce")
-        issue_date = pd.to_datetime(df[ISSUE_DATE], errors="coerce")
-
-        days_taken_to_issue = (issue_date - applied_date).dt.days
-        days_taken_to_issue = days_taken_to_issue.dropna()
-
-        return f"{days_taken_to_issue.mean():.1f} Days"
+        return compute_avg_days(filtered_df(), APPLIED_DATE, ISSUE_DATE)
 
     @render_altair
     def permit_volume_trend():
@@ -627,37 +891,65 @@ def server(input, output, session):
             df.groupby('month')
             .size()
             .reset_index(name='count')
+            .sort_values('month')
         )
 
         start, end = input.date_range()
+        axis_config = get_time_axis(start, end)
+
+        base = alt.Chart(monthly).encode(
+            x=alt.X(
+                'month:T', 
+                scale=alt.Scale(domain=[pd.to_datetime(start), pd.to_datetime(end)]),
+                axis=axis_config
+            ),
+            y=alt.Y(
+                'count:Q', 
+                title='Count',
+                axis=alt.Axis(titleFontWeight='bold')
+            ),
+        )
+
+        line = base.mark_line(color="#6C5CE7", strokeWidth=2.5)
+
+        points = base.mark_point(color="#6C5CE7", size=30, opacity=0).encode(
+            tooltip=[
+                alt.Tooltip('month:T', title='Month', format='%b %Y'),
+                alt.Tooltip('count:Q', title='Permits'),
+            ]
+        )
 
         chart = (
-            alt.Chart(monthly)
-            .mark_line()
-            .encode(
-                x=alt.X('month:T', scale=alt.Scale(domain=[str(start), str(end)]), title='Year',
-                        axis=alt.Axis(titleFontWeight='bold')),
-                y=alt.Y('count:Q', title='Count',
-                        axis=alt.Axis(titleFontWeight='bold')),
-            )
+            (line + points)
             .properties(background="transparent")
             .configure_view(strokeWidth=0, fill="transparent")
-            .mark_line(color="#6C5CE7", strokeWidth=2.5)
         )
 
         return chart
 
-    @render_widget
+    @render_altair
     def top_neighborhoods():
         df = filtered_df().copy()
         n = input.top_n()
+        active_area = selected_area.get()
 
         top = (
-            df.groupby('GeoLocalArea')
+            df.groupby(AREA)
             .size()
             .reset_index(name='count')
             .nlargest(n, 'count')
             .sort_values('count', ascending=False)
+        )
+
+        top["is_selected"] = top[AREA].eq(active_area)
+
+        selected_bar = alt.selection_point(
+            name="selected_bar",
+            fields=[AREA],
+            on="click",
+            clear=False,
+            empty=True,
+            toggle=False,
         )
 
         chart = (
@@ -665,15 +957,56 @@ def server(input, output, session):
             .mark_bar()
             .encode(
                 x=alt.X('count:Q', title='Permit Count'),
-                y=alt.Y('GeoLocalArea:N', sort='-x', title='Neighborhood',
+                y=alt.Y(f'{AREA}:N', sort='-x', title='Neighborhood',
                         axis=alt.Axis(titleFontWeight='bold')),
-                tooltip=['GeoLocalArea', 'count']
+                color=alt.condition(
+                    alt.datum.is_selected,
+                    alt.value("#6C5CE7"),
+                    alt.value("#C8BFF7"),
+                ),
+                stroke=alt.condition(
+                    alt.datum.is_selected,
+                    alt.value("#5A4BD1"),
+                    alt.value("#C8BFF7"),
+                ),
+                strokeWidth=alt.condition(
+                    alt.datum.is_selected,
+                    alt.value(1.2),
+                    alt.value(0),
+                ),
+                tooltip=[AREA, 'count']
             )
+            .add_params(selected_bar)
             .properties(background="transparent")
             .configure_view(strokeWidth=0, fill="transparent")
-            .configure_mark(color="#6C5CE7")
         )
         return chart
+
+    @reactive.effect
+    def _sync_top_neighborhood_click():
+        selection = reactive_read(top_neighborhoods.widget.selections, "selected_bar")
+        area_name = None
+
+        if hasattr(selection, "value"):
+            selection = selection.value
+
+        if isinstance(selection, dict):
+            area_name = selection.get(AREA)
+            if isinstance(area_name, list) and area_name:
+                area_name = area_name[0]
+            elif not isinstance(area_name, str):
+                value = selection.get("value")
+                if isinstance(value, list) and value:
+                    first = value[0]
+                    if isinstance(first, dict):
+                        area_name = first.get(AREA)
+        elif isinstance(selection, list) and selection:
+            first = selection[0]
+            if isinstance(first, dict):
+                area_name = first.get(AREA)
+
+        if isinstance(area_name, str) and area_name in AREA_CHOICES:
+            apply_area_selection(area_name)
 
     @reactive.calc
     def map_df():
@@ -691,164 +1024,48 @@ def server(input, output, session):
 
         return grouped
 
-    @render_widget
-    def neighbourhood_map():
+    @reactive.effect
+    async def _update_neighbourhood_map():
         df = map_df()
         active_area = selected_area.get()
 
-        center = (49.26, -123.12)
-        m = ipyleaflet.Map(
-            center=center,
-            zoom=12,
-            layout={'height': '420px'},
-            basemap=ipyleaflet.basemaps.CartoDB.Positron,
-            zoom_delta=0.5,
-            zoom_snap=0.5,
-            scroll_wheel_zoom=False,
-            touch_zoom=True,
-            double_click_zoom=False,
-        )
-
         counts = dict(zip(df[AREA], df["permit_count"])) if not df.empty else {}
+        max_count = int(df["permit_count"].max()) if not df.empty else 0
 
-        geojson_data = copy.deepcopy(neighbourhood_geojson)
-        for feature in geojson_data["features"]:
+        features_out = []
+        for feature in neighbourhood_geojson["features"]:
             area_name = feature["properties"]["name"]
             count = int(counts.get(area_name, 0))
-            feature["properties"]["permit_count"] = count
+            features_out.append({
+                "type": "Feature",
+                "geometry": feature["geometry"],
+                "properties": {
+                    "name": area_name,
+                    "permit_count": count,
+                    "fillColor": heat_fill_color(count, max_count),
+                    "fillOpacity": 0.72 if count > 0 else 0.28,
+                    "isSelected": area_name == active_area,
+                },
+            })
 
-        def geometry_bounds(geometry):
-            min_lat, min_lon = 90.0, 180.0
-            max_lat, max_lon = -90.0, -180.0
+        tick_values = [max_count, max_count * 3 // 4, max_count // 2, max_count // 4, 0]
+        tick_labels = [format_legend_tick(float(v)) for v in tick_values]
 
-            def walk(coords):
-                nonlocal min_lat, min_lon, max_lat, max_lon
-                if not coords:
-                    return
-                if isinstance(coords[0], (int, float)) and len(coords) >= 2:
-                    lon, lat = float(coords[0]), float(coords[1])
-                    min_lat = min(min_lat, lat)
-                    max_lat = max(max_lat, lat)
-                    min_lon = min(min_lon, lon)
-                    max_lon = max(max_lon, lon)
-                    return
-                for item in coords:
-                    walk(item)
+        await session.send_custom_message("update_nbhd_map", {
+            "data": {"type": "FeatureCollection", "features": features_out},
+            "bounds": INITIAL_MAP_BOUNDS,
+            "tick_labels": tick_labels,
+        })
 
-            walk(geometry.get("coordinates", []))
-            return min_lat, min_lon, max_lat, max_lon
-
-        geo_layer = ipyleaflet.GeoJSON(
-            data=geojson_data,
-            style={
-                "color": "#4B5563",
-                "weight": 1.2,
-                "dashArray": "6 4",
-                "fillColor": "#E5E7EB",
-                "fillOpacity": 0.35,
-            },
-            hover_style={
-                "color": "#1D4ED8",
-                "weight": 2.0,
-                "dashArray": "6 4",
-                "fillColor": "#3B82F6",
-                "fillOpacity": 0.65,
-            },
-        )
-        m.add(geo_layer)
-
-        selected_layer = None
-        # Strong, persistent border highlight for selected neighbourhood.
-        if active_area != "All":
-            selected_feature = next(
-                (
-                    feature for feature in geojson_data["features"]
-                    if feature["properties"]["name"] == active_area
-                ),
-                None,
-            )
-            if selected_feature is not None:
-                selected_layer = ipyleaflet.GeoJSON(
-                    data={"type": "FeatureCollection", "features": [selected_feature]},
-                    style={
-                        "color": "#1D4ED8",
-                        "weight": 4,
-                        "dashArray": "2 0",
-                        "fillColor": "#DBEAFE",
-                        "fillOpacity": 0.0,
-                    },
-                    hover_style={
-                        "color": "#1D4ED8",
-                        "weight": 4,
-                        "dashArray": "2 0",
-                        "fillColor": "#3B82F6",
-                        "fillOpacity": 0.65,
-                    },
-                )
-                m.add(selected_layer)
-
-        # Neighbourhood features currently visible after filtering.
-        selected_areas = set(df[AREA].tolist()) if not df.empty else set()
-        relevant_features = [
-            f for f in geojson_data["features"]
-            if not selected_areas or f["properties"]["name"] in selected_areas
-        ]
-
-        hover_info = HTML(value="")
-        hover_control = ipyleaflet.WidgetControl(widget=hover_info, position="topright")
-
-        def hide_hover_info():
-            hover_info.value = ""
-            if hover_control in m.controls:
-                m.remove(hover_control)
-
-        def update_hover_info(**kwargs):
-            props = kwargs.get("properties") or {}
-            name = props.get("name")
-            count = props.get("permit_count", 0)
-
-            if not name:
-                hide_hover_info()
-                return
-
-            hover_info.value = f"<b>{name}</b><br>Permits: {count:,}"
-            if hover_control not in m.controls:
-                m.add(hover_control)
-
-        def clear_on_mouseout(**kwargs):
-            if kwargs.get("type") in ("mouseout", "mouseleave"):
-                hide_hover_info()
-
-        if hasattr(geo_layer, "on_hover"):
-            geo_layer.on_hover(update_hover_info)
-        if selected_layer is not None and hasattr(selected_layer, "on_hover"):
-            selected_layer.on_hover(update_hover_info)
-        if hasattr(m, "on_interaction"):
-            m.on_interaction(clear_on_mouseout)
-
-        # Auto-zoom so all filtered/selected neighbourhoods are visible.
-        if relevant_features:
-            south, west = 90.0, 180.0
-            north, east = -90.0, -180.0
-            for feature in relevant_features:
-                min_lat, min_lon, max_lat, max_lon = geometry_bounds(feature["geometry"])
-                south = min(south, min_lat)
-                west = min(west, min_lon)
-                north = max(north, max_lat)
-                east = max(east, max_lon)
-            if active_area == "All":
-                lat_pad = max(0.002, (north - south) * 0.05)
-                lon_pad = max(0.002, (east - west) * 0.05)
-            else:
-                # Keep a wider local context when a single neighbourhood is selected.
-                lat_pad = max(0.02, (north - south) * 0.50)
-                lon_pad = max(0.02, (east - west) * 0.50)
-            m.fit_bounds([
-                (south - lat_pad, west - lon_pad),
-                (north + lat_pad, east + lon_pad),
-            ])
-
-        return m
+    @reactive.effect
+    @reactive.event(input.map_click)
+    def _sync_map_click():
+        try:
+            area_name = input.map_click()
+        except Exception:
+            return
+        if isinstance(area_name, str) and area_name in AREA_CHOICES:
+            apply_area_selection(area_name)
 
 
 app = App(app_ui, server)
