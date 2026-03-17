@@ -1,5 +1,5 @@
 # running tests:
-# python -m pytest tests/test_app_playwright.py -v --browser chromium
+# python -m pytest tests/test_app_playwright.py -v --browser firefox
 
 
 from shiny.playwright import controller
@@ -15,8 +15,7 @@ app = create_app_fixture("../src/app.py")
 
 def test_initial_value_boxes_non_empty(page: Page, app: ShinyAppProc) -> None:
     """Value boxes render with non-empty values on load;
-    ensures Reactive chains correctly fire on startup."""
-    page.goto(app.url)
+    ensures reactive chains correctly fire on startup."""
     page.goto(app.url)
     controller.OutputText(page, "permits_to_date").expect_value(re.compile(r".+"))
     controller.OutputText(page, "avg_days").expect_value(re.compile(r".+"))
@@ -27,11 +26,12 @@ def test_initial_value_boxes_non_empty(page: Page, app: ShinyAppProc) -> None:
     assert permits_to_date != "", "permits_to_date should not be empty on load"
     assert avg_days != "", "avg_days should not be empty on load"
 
+
 def test_initial_avg_days_format(page: Page, app: ShinyAppProc) -> None:
     """Avg Processing Time box correctly renders as '<number> Days';
     a format change would break the value-box label."""
     page.goto(app.url)
-    page.wait_for_load_state("networkidle")
+    controller.OutputText(page, "avg_days").expect_value(re.compile(r".+"))
 
     value = controller.OutputText(page, "avg_days").get_value()
     assert value.endswith(" Days"), (
@@ -45,17 +45,17 @@ def test_deselect_all_checkboxes_zeroes_permit_count(page: Page, app: ShinyAppPr
     """Deselecting all permit type checkboxes reduces the permit count to 0;
     ensures the type filter is functioning correctly."""
     page.goto(app.url)
-    page.wait_for_load_state("networkidle")
+    controller.OutputText(page, "permits_to_date").expect_value(re.compile(r".+"))
 
     controller.InputCheckboxGroup(page, "checkbox_group").set([])
     controller.OutputText(page, "permits_to_date").expect_value("0")
 
 
-def test_permit_filter_reduces_perit_count(page, app):
+def test_permit_filter_reduces_permit_count(page: Page, app: ShinyAppProc) -> None:
     """Selecting a single permit type reduces the permit count;
     ensures the type filter is functioning correctly."""
     page.goto(app.url)
-    page.wait_for_load_state("networkidle")
+    controller.OutputText(page, "permits_to_date").expect_value(re.compile(r".+"))
     full_count = int(
         controller.OutputText(page, "permits_to_date").get_value().replace(",", "")
     )
@@ -73,11 +73,11 @@ def test_permit_filter_reduces_perit_count(page, app):
 
 # Neighbourhood filter
 
-def test_neighbourhood_filter_reduces_permit_count(page, app):
+def test_neighbourhood_filter_reduces_permit_count(page: Page, app: ShinyAppProc) -> None:
     """Selecting a single neighborhood reduces the permit count;
     ensures the area filter is functioning correctly."""
     page.goto(app.url)
-    page.wait_for_load_state("networkidle")
+    controller.OutputText(page, "permits_to_date").expect_value(re.compile(r".+"))
     full_count = int(
         controller.OutputText(page, "permits_to_date").get_value().replace(",", "")
     )
@@ -97,22 +97,25 @@ def test_neighbourhood_filter_updates_avg_days(page: Page, app: ShinyAppProc) ->
     """Selecting a single neighbourhood updates Avg Processing Time;
     ensures the avg_days reactive re-fires when the area filter changes."""
     page.goto(app.url)
-    page.wait_for_load_state("networkidle")
+    controller.OutputText(page, "avg_days").expect_value(re.compile(r".+"))
+    city_wide = controller.OutputText(page, "avg_days").get_value()
 
     controller.InputSelectize(page, "area").set("Downtown")
-    downtown = controller.OutputText(page, "avg_days").get_value()
 
-    # Values may coincidentally match but the output should always be well-formed
+    avg_days = controller.OutputText(page, "avg_days")
+    avg_days.expect_value(re.compile(rf"^(?!{re.escape(city_wide)}$).+"))
+    downtown = avg_days.get_value()
+
     assert downtown.endswith(" Days"), f"Unexpected format after area filter: {downtown!r}"
 
 
 # Date range filter
 
-def test_narrow_date_range_reduces_permit_count(page, app):
+def test_narrow_date_range_reduces_permit_count(page: Page, app: ShinyAppProc) -> None:
     """Reducing the date range reduces the permit count;
     ensures the date range filter is functioning correctly."""
     page.goto(app.url)
-    page.wait_for_load_state("networkidle")
+    controller.OutputText(page, "permits_to_date").expect_value(re.compile(r".+"))
     full_count = int(
         controller.OutputText(page, "permits_to_date").get_value().replace(",", "")
     )
@@ -132,12 +135,14 @@ def test_date_range_boundary_permits_are_included(page: Page, app: ShinyAppProc)
     """Setting the same start and end dates returns the permits
     issued on that day; ensures the filter is inclusive on both ends."""
     page.goto(app.url)
-    page.wait_for_load_state("networkidle")
+    controller.OutputText(page, "permits_to_date").expect_value(re.compile(r".+"))
+    full_count_str = controller.OutputText(page, "permits_to_date").get_value()
 
-    date_range = controller.InputDateRange(page, "date_range")
-    date_range.set(("2023-06-15", "2023-06-15"))
+    controller.InputDateRange(page, "date_range").set(("2023-06-15", "2023-06-15"))
 
-    count_str = controller.OutputText(page, "permits_to_date").get_value()
+    permits = controller.OutputText(page, "permits_to_date")
+    permits.expect_value(re.compile(rf"^(?!{re.escape(full_count_str)}$).+"))
+    count_str = permits.get_value()
 
     assert count_str.replace(",", "").isdigit(), (
         f"permits_to_date should be an integer for a single-day range, got: {count_str!r}"
@@ -147,26 +152,22 @@ def test_date_range_boundary_permits_are_included(page: Page, app: ShinyAppProc)
 # Reset button
 
 def test_reset_restores_permit_count(page: Page, app: ShinyAppProc) -> None:
-    """After applying filters, the Reset button restores the full permit
-    count."""
+    """After applying filters, the Reset button restores the full permit count."""
     page.goto(app.url)
-    page.wait_for_load_state("networkidle")
-
+    controller.OutputText(page, "permits_to_date").expect_value(re.compile(r".+"))
     full_count = controller.OutputText(page, "permits_to_date").get_value()
 
-    # Narrow via checkbox, then reset
     controller.InputCheckboxGroup(page, "checkbox_group").set([])
     controller.OutputText(page, "permits_to_date").expect_value("0")
 
     controller.InputActionButton(page, "action_button").click()
-
     controller.OutputText(page, "permits_to_date").expect_value(full_count)
 
 
 def test_reset_restores_neighbourhood_selection(page: Page, app: ShinyAppProc) -> None:
     """Reset returns the neighbourhood dropdown to 'All'."""
     page.goto(app.url)
-    page.wait_for_load_state("networkidle")
+    controller.OutputText(page, "permits_to_date").expect_value(re.compile(r".+"))
 
     controller.InputSelectize(page, "area").set("Kitsilano")
     controller.InputActionButton(page, "action_button").click()
@@ -177,7 +178,7 @@ def test_reset_restores_neighbourhood_selection(page: Page, app: ShinyAppProc) -
 def test_reset_restores_top_n_slider(page: Page, app: ShinyAppProc) -> None:
     """Reset restores the Top Neighbourhoods slider to its default of 5."""
     page.goto(app.url)
-    page.wait_for_load_state("networkidle")
+    controller.OutputText(page, "permits_to_date").expect_value(re.compile(r".+"))
 
     controller.InputSlider(page, "top_n").set("15")
     controller.InputActionButton(page, "action_button").click()
