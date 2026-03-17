@@ -32,6 +32,20 @@
 
 Milestone 4 focused on addressing instructor and peer feedback, improving code quality, and adding an advanced interactive feature. The two critical visual bugs (value card height and x-axis labelling) were resolved first. The map was rebuilt from ipyleaflet to pure Leaflet.js to support heatmap polygon coloring, which was a significant refactor but resulted in better geographic visualization. The advanced feature (cross-filtering between the map and bar chart via click events) adds a coordinated view interaction pattern that was not in the original plan but improves the exploratory workflow. On the engineering side, the data loading was migrated to Ibis + DuckDB with Parquet files for better performance, utility functions were extracted and tested, and Playwright end-to-end tests were added to catch regressions. Non-critical feedback items addressed include the permit volume tooltip and the empty state message for cleared filters. Remaining non-critical items (N1 summary text, N2/N3 AI tab layout, N6 multi-select, N7 hover tooltips) were deprioritized in favour of the testing and advanced feature requirements.
 
+A Playwright test suite was implemented, examples below. Full implementations are documented in `test_app_playwright.py`
+test_initial_value_boxes_non_empty()
+- Value boxes render with non-empty values on load
+- Ensures reactive chains correctly fire on startup
+test_initial_avg_days_format()
+- Avg Processing Time box correctly renders as '<number> Days'
+- A format change would break the value-box label
+test_neighbourhood_filter_updates_avg_days()
+- Selecting a single neighbourhood updates Avg Processing Time
+- Ensures the avg_days reactive re-fires when the area filter changes
+test_date_range_boundary_permits_are_included()
+- Setting the same start and end dates returns the permits
+- Ensures the filter is inclusive on both ends
+
 ## [0.3.0] - 2026-02-12
 
 ### Added
