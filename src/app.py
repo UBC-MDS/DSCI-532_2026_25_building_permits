@@ -12,6 +12,8 @@ from querychat import QueryChat
 from dotenv import load_dotenv
 import ibis 
 from ibis import _ # _ is a shortcut for referencing columns in an ibis table expression without typing table name. ex) permits.filter(_.project_value < 10000) compared to permits.filter(permits.project_value < 10000)
+import sys
+sys.path.insert(0, os.path.dirname(__file__))
 
 from utils import get_unique_sorted, compute_avg_days
 
