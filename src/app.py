@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 import ibis 
 from ibis import _ # _ is a shortcut for referencing columns in an ibis table expression without typing table name. ex) permits.filter(_.project_value < 10000) compared to permits.filter(permits.project_value < 10000)
 
+from utils import get_unique_sorted, compute_avg_days
+
 load_dotenv()
 
 alt.themes.enable("latimes")
@@ -45,23 +47,12 @@ EARLIEST_ISSUE_DATE = permits_df[ISSUE_DATE].min().date()
 LATEST_ISSUE_DATE = permits_df[ISSUE_DATE].max().date()
 
 # Find the unique areas/neighbourhoods from the data
-areas = sorted(
-    permits_df[AREA]
-    .dropna()
-    .astype(str)
-    .unique()
-)
+areas = get_unique_sorted(permits_df[AREA])
 
 AREA_CHOICES = ['All'] + areas
 
 # Find the unique permit types to pass in to the sidebar filter below
-TYPE_CHOICES = sorted(
-    permits_df[PERMIT_TYPE]
-    .dropna()
-    .astype(str)
-    .str.strip()
-    .unique()
-)
+TYPE_CHOICES = get_unique_sorted(permits_df[PERMIT_TYPE])
 
 MAP_HEAT_COLORS = ["#F5F3FF", "#DDD6FE", "#A78BFA", "#7C3AED", "#5B21B6"]
 MAP_HEAT_CMAP = LinearSegmentedColormap.from_list("permit_heat", MAP_HEAT_COLORS)
@@ -70,7 +61,7 @@ MAP_HEAT_CMAP = LinearSegmentedColormap.from_list("permit_heat", MAP_HEAT_COLORS
 def heat_fill_color(count, max_count):
     if max_count <= 0:
         return "#E5E7EB"
-    scale_value = min(max(count / max_count, 0), 1)
+    scale_value = min(max(count / max_count, 0.0), 1.0)
     return to_hex(MAP_HEAT_CMAP(scale_value))
 
 
@@ -886,17 +877,7 @@ def server(input, output, session):
 
     @render.text
     def avg_days():
-        df = filtered_df()
-        if df.empty:
-            return "0 Days"
-        
-        applied_date = pd.to_datetime(df[APPLIED_DATE], errors="coerce")
-        issue_date = pd.to_datetime(df[ISSUE_DATE], errors="coerce")
-
-        days_taken_to_issue = (issue_date - applied_date).dt.days
-        days_taken_to_issue = days_taken_to_issue.dropna()
-
-        return f"{days_taken_to_issue.mean():.1f} Days"
+        return compute_avg_days(filtered_df(), APPLIED_DATE, ISSUE_DATE)
 
     @render_altair
     def permit_volume_trend():
